@@ -237,7 +237,7 @@ def parse_single_file(uploaded_file):
         "paqfile start time": "-",
         "title": "-",
         "operator": "-",
-        "product": "CONDENSER 12SHP+ & KN6,9",
+        "product": "CONDENSER",
         "site": "VSTS / Power Chonburi",
         "note_1": "-",
         "raw_text": text_content
@@ -263,7 +263,7 @@ def parse_single_file(uploaded_file):
                 elif key.lower() == "operator":
                     metadata["operator"] = val
                 elif key.lower() == "product":
-                    metadata["product"] = val if (val and val != "-") else "CONDENSER 12SHP+ & KN6,9"
+                    metadata["product"] = val if (val and val != "-") else "CONDENSER"
                 elif key.lower() == "site":
                     metadata["site"] = val if (val and val != "-") else "VSTS / Power Chonburi"
                 elif "note" in key.lower():
@@ -407,35 +407,13 @@ if uploaded_files:
         st.sidebar.markdown("---")
         st.sidebar.header("🎛️ Dynamic Controls")
         
-        # 📌 ระบบตรวจจับขอบเขตเวลาอัตโนมัติตาม Recipe Model ของไฟล์
-        raw_text_meta = metadata.get("raw_text", "").upper()
-        if "16XHP" in raw_text_meta:
-            default_dryer_end = 270
-            default_db_start = 330
-            default_db_end = 840
-            detected_model_name = "16XHP"
-        else:
-            default_dryer_end = 271
-            default_db_start = 298
-            default_db_end = 841
-            detected_model_name = "27XHP / SU2"
-
-        st.sidebar.info(f"🤖 ตรวจพบประเภทสูตรอัตโนมัติ: **{detected_model_name}**")
-
-        # 🎛️ เพิ่ม Slider ปรับแต่งช่วงวินาทีเพื่อ Fine-Tune เพิ่มเติมได้ถ้าต้องการ
-        with st.sidebar.expander("🛠️ ปรับขอบเขตวินาทีของโซน (Optional Zone Boundaries)"):
-            dryer_max_sec = st.slider("Dryer End Sec (วินาทีที่จบ Dryer):", 200, 350, default_dryer_end)
-            db_range_sec = st.slider("Debinder Zone Sec (ช่วงวินาที Debinder):", 250, 900, (default_db_start, default_db_end))
+        # 📌 กำหนดค่าขอบเขตเวลาเบื้องหลัง
+        dryer_max_sec = 271
+        db_range_sec = (298, 841)
 
         color_shading_mode = st.sidebar.radio(
             "เลือกโหมดแสดงสี:",
             ["แสดงสีตามโซน (By Zone)", "แสดงสีตามกลุ่มงาน (By Process Group)"],
-            index=0
-        )
-
-        position_naming = st.sidebar.radio(
-            "เลือกรูปแบบชื่อตำแหน่งหัววัด (Location Name):",
-            ["Bottom / Top", "Right / Left"],
             index=0
         )
 
@@ -490,7 +468,7 @@ if uploaded_files:
             st.markdown(f"""
                 <div class="raw-header-box">
                     <div><span class="raw-header-key">#operator</span> = <span class="raw-header-val">{metadata.get('operator', '-')}</span></div>
-                    <div><span class="raw-header-key">#product</span> = <span class="raw-header-val">{metadata.get('product', 'CONDENSER 12SHP+ & KN6,9')}</span></div>
+                    <div><span class="raw-header-key">#product</span> = <span class="raw-header-val">{metadata.get('product', 'CONDENSER')}</span></div>
                     <div><span class="raw-header-key">#site</span> = <span class="raw-header-val">{metadata.get('site', 'VSTS / Power Chonburi')}</span></div>
                 </div>
             """, unsafe_allow_html=True)
@@ -659,11 +637,11 @@ if uploaded_files:
         """, unsafe_allow_html=True)
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า (อัปเดตใช้ช่วงเวลาตามสูตรที่ตรวจพบ)
+        # 📊 ตารางสรุปค่า
         # ---------------------------------------------------------
         st.markdown("### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)")
 
-        # 📌 การตัด Subset ตามสไลเดอร์/การตรวจจับสูตรอัตโนมัติ
+        # 📌 การตัด Subset
         dryer_subset = df[(df["ElapsedSeconds"] >= 0) & (df["ElapsedSeconds"] <= dryer_max_sec)]
         debinder_subset = df[(df["ElapsedSeconds"] >= db_range_sec[0]) & (df["ElapsedSeconds"] <= db_range_sec[1])]
         
@@ -684,10 +662,8 @@ if uploaded_files:
 
         summary_rows = []
         for p_num, col_name in ordered_cols:
-            if position_naming == "Bottom / Top":
-                location = "Bottom" if p_num in [1, 2, 3, 8] else "Top"
-            else:
-                location = "Right" if p_num in [1, 2, 3, 8] else "Left"
+            # 📌 กำหนดตำแหน่งหัววัดคงที่: PB#1-4 = Bottom, PB#5-8 = Top
+            location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
 
             short_pb_name = f"PB#{p_num}"
             
