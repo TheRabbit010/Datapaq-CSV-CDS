@@ -682,9 +682,13 @@ if uploaded_file:
                 db_dwell_str = "***"
                 
             if is_db_d_valid and pd.notna(d_val):
+                d_dwell_150_sec = (dryer_subset[target_col_db_d] >= 150.0).sum() if not dryer_subset.empty else 0
+                d_dwell_150_str = format_seconds_to_time(d_dwell_150_sec)
+
                 d_dwell_sec = (dryer_subset[target_col_db_d] >= 200.0).sum() if not dryer_subset.empty else 0
                 d_dwell_str = format_seconds_to_time(d_dwell_sec)
             else:
+                d_dwell_150_str = "***"
                 d_dwell_str = "***"
 
             summary_rows.append([
@@ -695,6 +699,7 @@ if uploaded_file:
                 d_max,
                 br_dwell_str,
                 db_dwell_str,
+                d_dwell_150_str,
                 d_dwell_str
             ])
 
@@ -706,6 +711,7 @@ if uploaded_file:
             ("Dryer", "Max temp / probe (°C)"),
             ("Brazing zone", "at 577°C / probe"),
             ("Debinder", "at 300°C / probe"),
+            ("Dryer", "at 150°C / probe"),
             ("Dryer", "at 200°C / probe")
         ])
 
@@ -722,7 +728,7 @@ if uploaded_file:
                 &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 7.45 min</b> for middle center & 1st tube after side plate.<br>
                 &nbsp;&nbsp;&nbsp;&nbsp;• <b>2.00 - 7.45 min</b> for end cap RD , middle of the connector block & coldest block.<br>
                 • <b>Debinder Dwell Time:</b> at 300°C / probe: <b>> 2:30 min (>150s)</b><br>
-                • <b>Dryer Dwell Time:</b> at 200°C / probe: <b>> 1:30 min (>90s)</b>
+                • <b>Dryer Dwell Time:</b> at 150°C / probe: <b>&ge; 1:30 min (&ge;90s)</b> | at 200°C / probe: <b>> 1:30 min (>90s)</b>
             </div>
         """, unsafe_allow_html=True)
 
