@@ -631,11 +631,7 @@ if uploaded_file:
         # 📌 การตัด Subset
         dryer_subset = df[(df["ElapsedSeconds"] >= 0) & (df["ElapsedSeconds"] <= dryer_max_sec)]
         debinder_subset = df[(df["ElapsedSeconds"] >= db_range_sec[0]) & (df["ElapsedSeconds"] <= db_range_sec[1])]
-        
-        # Brazing Zone Dwell Time: สะสมเวลาทั้งไฟล์
         brazing_ht_subset = df[(df["ElapsedSeconds"] >= 0)]
-        
-        # Brazing Zone Max Temp: ช่วงแช่อุณหภูมิสูงสุด
         brazing_max_subset = df[(df["ElapsedSeconds"] >= 900) & (df["ElapsedSeconds"] <= 1750)]
 
         probe_order = [1, 2, 3, 4, 5, 6, 7, 8]
@@ -648,28 +644,42 @@ if uploaded_file:
 
         summary_rows = []
         for p_num, col_name in ordered_cols:
-            # 📌 กำหนดตำแหน่งหัววัดคงที่: PB#1-4 = Bottom, PB#5-8 = Top
+            # 📌 กำหนดตำแหน่งตามมาตรฐาน: PB#1-4 = Bottom, PB#5-8 = Top
             location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
             short_pb_name = f"PB#{p_num}"
             
-            # Max Temp (รองรับกรณีสายหลุดเป็น NaN)
-            br_val = brazing_max_subset[col_name].max() if not brazing_max_subset.empty else np.nan
+            # ตรวจสอบความถูกต้องของโพรบ (ป้องกันกรณีโพรบหลุด/หลวม หรือ *OC*)
+            probe_series = df[col_name]
+            is_probe_valid = probe_series.notna().any()
+            
+            # Max Temp
+            br_val = brazing_max_subset[col_name].max() if (is_probe_valid and not brazing_max_subset.empty) else np.nan
             br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
             
-            db_val = debinder_subset[col_name].max() if not debinder_subset.empty else np.nan
+            db_val = debinder_subset[col_name].max() if (is_probe_valid and not debinder_subset.empty) else np.nan
             db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
             
-            d_val = dryer_subset[col_name].max() if not dryer_subset.empty else np.nan
+            d_val = dryer_subset[col_name].max() if (is_probe_valid and not dryer_subset.empty) else np.nan
             d_max = f"{d_val:.1f}" if pd.notna(d_val) else "***"
             
-            # Dwell Time ตามเกณฑ์มาตรฐานในภาพอ้างอิง
-            br_dwell_577 = (brazing_ht_subset[col_name] >= 577.0).sum() if not brazing_ht_subset.empty else 0
-            db_dwell_300 = (debinder_subset[col_name] >= 300.0).sum() if not debinder_subset.empty else 0
-            d_dwell_200 = (dryer_subset[col_name] >= 200.0).sum() if not dryer_subset.empty else 0
-
-            br_dwell_str = format_seconds_to_time(br_dwell_577) if pd.notna(br_val) else "***"
-            db_dwell_str = format_seconds_to_time(db_dwell_300) if pd.notna(db_val) else "***"
-            d_dwell_str = format_seconds_to_time(d_dwell_200) if pd.notna(d_val) else "***"
+            # Dwell Times
+            if is_probe_valid and pd.notna(br_val):
+                br_dwell_sec = (brazing_ht_subset[col_name] >= 577.0).sum() if not brazing_ht_subset.empty else 0
+                br_dwell_str = format_seconds_to_time(br_dwell_sec)
+            else:
+                br_dwell_str = "***"
+                
+            if is_probe_valid and pd.notna(db_val):
+                db_dwell_sec = (debinder_subset[col_name] >= 300.0).sum() if not debinder_subset.empty else 0
+                db_dwell_str = format_seconds_to_time(db_dwell_sec)
+            else:
+                db_dwell_str = "***"
+                
+            if is_probe_valid and pd.notna(d_val):
+                d_dwell_sec = (dryer_subset[col_name] >= 200.0).sum() if not dryer_subset.empty else 0
+                d_dwell_str = format_seconds_to_time(d_dwell_sec)
+            else:
+                d_dwell_str = "***"
 
             summary_rows.append([
                 short_pb_name,
