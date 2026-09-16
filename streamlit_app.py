@@ -188,20 +188,17 @@ st.markdown("""
 # 3. แสดงชื่อโปรแกรมหลัก
 st.title("🏭 Datapaq NB1 CDS")
 
-# 4. ฟังก์ชันแปลงวินาทีเป็นรูปแบบ mm:ss หรือ hh:mm:ss
+# 4. ฟังก์ชันแปลงวินาทีเป็นรูปแบบ h:mm:ss หรือ mm:ss
 def format_seconds_to_time(total_seconds):
-    if pd.isna(total_seconds) or total_seconds == 0:
-        return "00:00"
+    if pd.isna(total_seconds) or total_seconds <= 0:
+        return "0:00:00"
     
     total_sec = int(round(total_seconds))
     hours = total_sec // 3600
     minutes = (total_sec % 3600) // 60
     seconds = total_sec % 60
     
-    if hours == 0:
-        return f"{minutes:02d}:{seconds:02d}"
-    else:
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 # ฟังก์ชันแปลง Hex Color เป็น RGBA
 def hex_to_rgba(hex_str, opacity=0.25):
@@ -332,25 +329,9 @@ def parse_single_file(uploaded_file):
             
         parsed_data.append(row_dict)
 
-    return pd.DataFrame(parsed_data), metadata
-
-def process_multiple_files(uploaded_files):
-    combined_dfs = []
-    first_metadata = None
-    
-    for file in uploaded_files:
-        df_single, meta_single = parse_single_file(file)
-        if not df_single.empty:
-            combined_dfs.append(df_single)
-            if first_metadata is None:
-                first_metadata = meta_single
-            
-    if not combined_dfs:
-        return pd.DataFrame(), {}
-
-    full_df = pd.concat(combined_dfs, ignore_index=True)
-    full_df = full_df.sort_values("ElapsedSeconds").reset_index(drop=True)
-    return full_df, first_metadata
+    df_res = pd.DataFrame(parsed_data)
+    df_res = df_res.drop_duplicates(subset=["ElapsedSeconds"]).sort_values("ElapsedSeconds").reset_index(drop=True)
+    return df_res, metadata
 
 # ฟังก์ชันแปลง DataFrame + Summary Table + แนบรูปกราฟลงในไฟล์ Excel (.xlsx)
 def to_excel_bytes(dataframe, summary_dataframe=None, fig_plotly=None):
@@ -389,20 +370,20 @@ if st.sidebar.button("🧹 เคลียร์ข้อมูลไฟล์�
     st.cache_data.clear()
     st.rerun()
 
-uploaded_files = st.sidebar.file_uploader(
-    "อัปโหลดไฟล์ CSV (.csv) ได้มากกว่า 1 ไฟล์", 
+uploaded_file = st.sidebar.file_uploader(
+    "อัปโหลดไฟล์ CSV (.csv)", 
     type=["csv"],
-    accept_multiple_files=True
+    accept_multiple_files=False
 )
 
 # 7. แสดงผล Header Metadata + กราฟพร้อมโซนเวลา
-if uploaded_files:
-    df, metadata = process_multiple_files(uploaded_files)
+if uploaded_file:
+    df, metadata = parse_single_file(uploaded_file)
     
     if df.empty:
         st.error("⚠️ ไม่สามารถอ่านข้อมูลจากไฟล์ที่อัปโหลดได้ กรุณาตรวจสอบว่าเป็นไฟล์ CSV จาก Datapaq หรือไม่")
     else:
-        st.sidebar.success(f"รวมข้อมูลสำเร็จ {len(uploaded_files)} ไฟล์ ({len(df)} แถว)")
+        st.sidebar.success(f"โหลดไฟล์ {uploaded_file.name} สำเร็จ ({len(df)} แถว)")
 
         st.sidebar.markdown("---")
         st.sidebar.header("🎛️ Dynamic Controls")
@@ -651,8 +632,7 @@ if uploaded_files:
         # Brazing Zone Max Temp: ช่วงแช่อุณหภูมิสูงสุด
         brazing_max_subset = df[(df["ElapsedSeconds"] >= 900) & (df["ElapsedSeconds"] <= 1750)]
 
-        # ลำดับ Probe ให้ตรงตามแม่แบบ: 1, 2, 3, 8, 4, 5, 6, 7
-        probe_order = [1, 2, 3, 8, 4, 5, 6, 7]
+        probe_order = [1, 2, 3, 4, 5, 6, 7, 8]
         ordered_cols = []
         for p_num in probe_order:
             for c in probe_cols[:8]:
@@ -660,55 +640,68 @@ if uploaded_files:
                     ordered_cols.append((p_num, c))
                     break
 
+        # คำนวณ Pitch Max, Pitch Min, Pitch AVG สำหรับ Brazing Zone ของโพรบที่ใช้งานได้
+        valid_br_maxs = []
+        for p_num, col_name in ordered_cols:
+            val = brazing_max_subset[col_name].max() if not brazing_max_subset.empty else np.nan
+            if pd.notna(val):
+                valid_br_maxs.append(val)
+
+        pitch_max_str = f"{max(valid_br_maxs):.1f}" if valid_br_maxs else "***"
+        pitch_min_str = f"{min(valid_br_maxs):.1f}" if valid_br_maxs else "***"
+        pitch_avg_str = f"{np.mean(valid_br_maxs):.1f}" if valid_br_maxs else "***"
+
         summary_rows = []
         for p_num, col_name in ordered_cols:
             # 📌 กำหนดตำแหน่งหัววัดคงที่: PB#1-4 = Bottom, PB#5-8 = Top
             location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
-
             short_pb_name = f"PB#{p_num}"
             
             # Max Temp (รองรับกรณีสายหลุดเป็น NaN)
             br_val = brazing_max_subset[col_name].max() if not brazing_max_subset.empty else np.nan
-            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "-"
+            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
             
             db_val = debinder_subset[col_name].max() if not debinder_subset.empty else np.nan
-            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "-"
+            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
             
             d_val = dryer_subset[col_name].max() if not dryer_subset.empty else np.nan
-            d_max = f"{d_val:.1f}" if pd.notna(d_val) else "-"
+            d_max = f"{d_val:.1f}" if pd.notna(d_val) else "***"
             
-            # Dwell Time
-            br_dwell_600 = (brazing_ht_subset[col_name] >= 600.0).sum() if not brazing_ht_subset.empty else 0
-            br_dwell_583 = (brazing_ht_subset[col_name] >= 583.0).sum() if not brazing_ht_subset.empty else 0
+            # Dwell Time ตามเกณฑ์มาตรฐานในภาพอ้างอิง
             br_dwell_577 = (brazing_ht_subset[col_name] >= 577.0).sum() if not brazing_ht_subset.empty else 0
-            
-            db_dwell_200 = (debinder_subset[col_name] >= 200.0).sum() if not debinder_subset.empty else 0
-            d_dwell_175 = (dryer_subset[col_name] >= 175.0).sum() if not dryer_subset.empty else 0
+            db_dwell_300 = (debinder_subset[col_name] >= 300.0).sum() if not debinder_subset.empty else 0
+            d_dwell_200 = (dryer_subset[col_name] >= 200.0).sum() if not dryer_subset.empty else 0
+
+            br_dwell_str = format_seconds_to_time(br_dwell_577) if pd.notna(br_val) else "***"
+            db_dwell_str = format_seconds_to_time(db_dwell_300) if pd.notna(db_val) else "***"
+            d_dwell_str = format_seconds_to_time(d_dwell_200) if pd.notna(d_val) else "***"
 
             summary_rows.append([
-                location,
                 short_pb_name,
+                location,
                 br_max,
+                pitch_max_str,
+                pitch_min_str,
+                pitch_avg_str,
                 db_max,
                 d_max,
-                format_seconds_to_time(br_dwell_600),
-                format_seconds_to_time(br_dwell_583),
-                format_seconds_to_time(br_dwell_577),
-                format_seconds_to_time(db_dwell_200),
-                format_seconds_to_time(d_dwell_175)
+                br_dwell_str,
+                db_dwell_str,
+                d_dwell_str
             ])
 
         multi_cols = pd.MultiIndex.from_tuples([
-            ("", "Location"),
             ("", "Probe"),
-            ("Max Temp (°C)", "Brazing"),
-            ("Max Temp (°C)", "Debinder"),
-            ("Max Temp (°C)", "Dryer"),
-            ("Brazing Zone", "Dwell Time Above 600°C"),
-            ("Brazing Zone", "Dwell Time Above 583°C"),
-            ("Brazing Zone", "Dwell Time Above 577°C"),
-            ("Debinder Zone", "Dwell Time Above 200°C"),
-            ("Dryer Zone", "Dwell Time Above 175°C")
+            ("", "Location"),
+            ("Brazing zone", "Max temp / probe (°C)"),
+            ("Brazing zone", "Max temp / pitch (°C)"),
+            ("Brazing zone", "Min temp / pitch (°C)"),
+            ("Brazing zone", "AVG temp / pitch (°C)"),
+            ("Debinder", "Max temp / probe (°C)"),
+            ("Dryer", "Max temp / probe (°C)"),
+            ("Brazing zone", "at 577°C / probe"),
+            ("Debinder", "at 300°C / probe"),
+            ("Dryer", "at 200°C / probe")
         ])
 
         display_summary_df = pd.DataFrame(summary_rows, columns=multi_cols)
@@ -719,10 +712,10 @@ if uploaded_files:
         st.markdown("""
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px;">
                 <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards):</b><br>
-                • <b>Maximum Temperatures (°C):</b> Brazing (Corner Probes: <b>596 - 610 °C</b> | Center Probes #2, #5: <b>583 - 607 °C</b>) | Debinder: <b>200 - 375 °C</b> | Dryer: <b>175 - 260 °C</b><br>
-                • <b>Brazing Dwell Time (คิดช่วงเวลา 00:00:00 to 00:35:35):</b> Dwell Time Above 600°C: <b>< 4:00 min (<240s)</b> | Dwell Time Above 583°C & 577°C: <b>2:30 - 6:00 min (150s - 360s)</b><br>
-                • <b>Debinder Dwell Time:</b> Dwell Time Above 200°C: <b>> 2:00 min (>120s)</b><br>
-                • <b>Dryer Dwell Time:</b> Dwell Time Above 175°C: <b>> 1:00 min (>60s)</b>
+                • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
+                • <b>Brazing Dwell Time:</b> at 577°C / probe: <b>4:00 - 6:30 min (หรือ 4:00 - 7:45 min ตามตำแหน่งชิ้นงาน)</b><br>
+                • <b>Debinder Dwell Time:</b> at 300°C / probe: <b>> 2:30 min (>150s)</b><br>
+                • <b>Dryer Dwell Time:</b> at 200°C / probe: <b>> 1:30 min (>90s)</b>
             </div>
         """, unsafe_allow_html=True)
 
@@ -754,4 +747,4 @@ if uploaded_files:
                 )
 
 else:
-    st.info("👈 กรุณาเลือกอัปโหลดไฟล์ (.csv) ที่เมนูด้านซ้าย สามารถเลือกอัปโหลดได้มากกว่า 1 ไฟล์")
+    st.info("👈 กรุณาเลือกอัปโหลดไฟล์ (.csv) ที่เมนูด้านซ้าย")
