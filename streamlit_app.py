@@ -1,5 +1,4 @@
 import io
-import re
 import openpyxl
 import pandas as pd
 import numpy as np
@@ -212,7 +211,7 @@ def hex_to_rgba(hex_str, opacity=0.25):
     b = int(hex_str[4:6], 16)
     return f"rgba({r}, {g}, {b}, {opacity})"
 
-# 5. ฟังก์ชันอ่านไฟล์ CSV และดึงข้อมูล
+# 5. ฟังก์ชันอ่านไฟล์ CSV และดึงข้อมูล (รองรับค่า *OC* สายหลุด)
 def parse_single_file(uploaded_file):
     uploaded_file.seek(0)
     raw_bytes = uploaded_file.read()
@@ -238,7 +237,9 @@ def parse_single_file(uploaded_file):
         "paqfile start time": "-",
         "title": "-",
         "operator": "-",
-        "product": "-",
+        "product": "CONDENSER 12SHP+ & KN6,9",
+        "site": "VSTS / Power Chonburi",
+        "note_1": "-",
         "raw_text": text_content
     }
 
@@ -262,23 +263,45 @@ def parse_single_file(uploaded_file):
                 elif key.lower() == "operator":
                     metadata["operator"] = val
                 elif key.lower() == "product":
-                    metadata["product"] = val
+                    metadata["product"] = val if (val and val != "-") else "CONDENSER 12SHP+ & KN6,9"
+                elif key.lower() == "site":
+                    metadata["site"] = val if (val and val != "-") else "VSTS / Power Chonburi"
+                elif "note" in key.lower():
+                    metadata["note_1"] = val
                 elif key.isdigit():
                     ch_num = int(key)
                     probe_labels[ch_num] = val
         else:
             parts = [p.strip() for p in line_str.split(",") if p.strip() != ""]
-            if len(parts) >= 10:
+            if len(parts) >= 3:
                 try:
-                    time_str = parts[0]
+                    time_str = parts[0].strip()
+                    
+                    if time_str.startswith("-"):
+                        continue
+                        
                     t_parts = time_str.split(":")
                     if len(t_parts) == 3:
                         elapsed_sec = int(t_parts[0]) * 3600 + int(t_parts[1]) * 60 + int(t_parts[2])
                     else:
                         elapsed_sec = len(data_rows)
                     
-                    dist_val = float(parts[1])
-                    probe_vals = [float(p) for p in parts[2:10]]
+                    try:
+                        dist_val = float(parts[1])
+                    except ValueError:
+                        dist_val = 0.0
+                        
+                    # แปลงค่าโพรบที่ไม่ใช่ตัวเลข (เช่น *OC*) เป็น np.nan
+                    probe_vals = []
+                    for p in parts[2:10]:
+                        try:
+                            probe_vals.append(float(p))
+                        except ValueError:
+                            probe_vals.append(np.nan)
+                    
+                    # เติม np.nan ให้ครบ 8 Probe หากแชนแนลเปิดไม่ครบ
+                    while len(probe_vals) < 8:
+                        probe_vals.append(np.nan)
                     
                     data_rows.append({
                         "elapsed_sec": elapsed_sec,
@@ -286,7 +309,7 @@ def parse_single_file(uploaded_file):
                         "dist_val": dist_val,
                         "probes": probe_vals
                     })
-                except (ValueError, IndexError):
+                except Exception:
                     continue
 
     if not data_rows:
@@ -467,7 +490,8 @@ if uploaded_files:
             st.markdown(f"""
                 <div class="raw-header-box">
                     <div><span class="raw-header-key">#operator</span> = <span class="raw-header-val">{metadata.get('operator', '-')}</span></div>
-                    <div><span class="raw-header-key">#product</span> = <span class="raw-header-val">{metadata.get('product', '-')}</span></div>
+                    <div><span class="raw-header-key">#product</span> = <span class="raw-header-val">{metadata.get('product', 'CONDENSER 12SHP+ & KN6,9')}</span></div>
+                    <div><span class="raw-header-key">#site</span> = <span class="raw-header-val">{metadata.get('site', 'VSTS / Power Chonburi')}</span></div>
                 </div>
             """, unsafe_allow_html=True)
 
@@ -626,6 +650,15 @@ if uploaded_files:
         st.plotly_chart(fig, use_container_width=True)
 
         # ---------------------------------------------------------
+        # 📝 กล่องแสดงข้อความ #note #1 ด้านล่างรูปภาพกราฟ
+        # ---------------------------------------------------------
+        st.markdown(f"""
+            <div class="raw-header-box" style="margin-top: -10px; margin-bottom: 25px;">
+                <div><span class="raw-header-key">#note #1</span> = <span class="raw-header-val">{metadata.get('note_1', '-')}</span></div>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # ---------------------------------------------------------
         # 📊 ตารางสรุปค่า (อัปเดตใช้ช่วงเวลาตามสูตรที่ตรวจพบ)
         # ---------------------------------------------------------
         st.markdown("### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)")
@@ -645,7 +678,7 @@ if uploaded_files:
         ordered_cols = []
         for p_num in probe_order:
             for c in probe_cols[:8]:
-                if f"Probe #{p_num}" in c:
+                if f"Probe #{p_num}" in c or f"Probe #{p_num}:" in c:
                     ordered_cols.append((p_num, c))
                     break
 
@@ -658,10 +691,15 @@ if uploaded_files:
 
             short_pb_name = f"PB#{p_num}"
             
-            # Max Temp (คงเดิมตามที่คุณระบุไว้)
-            br_max = f"{brazing_max_subset[col_name].max():.1f}" if not brazing_max_subset.empty else "0.0"
-            db_max = f"{debinder_subset[col_name].max():.1f}" if not debinder_subset.empty else "0.0"
-            d_max = f"{dryer_subset[col_name].max():.1f}" if not dryer_subset.empty else "0.0"
+            # Max Temp (รองรับกรณีสายหลุดเป็น NaN)
+            br_val = brazing_max_subset[col_name].max() if not brazing_max_subset.empty else np.nan
+            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "-"
+            
+            db_val = debinder_subset[col_name].max() if not debinder_subset.empty else np.nan
+            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "-"
+            
+            d_val = dryer_subset[col_name].max() if not dryer_subset.empty else np.nan
+            d_max = f"{d_val:.1f}" if pd.notna(d_val) else "-"
             
             # Dwell Time
             br_dwell_600 = (brazing_ht_subset[col_name] >= 600.0).sum() if not brazing_ht_subset.empty else 0
