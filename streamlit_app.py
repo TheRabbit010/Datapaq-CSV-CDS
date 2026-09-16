@@ -1,4 +1,4 @@
-code = '''import io
+import io
 import openpyxl
 import pandas as pd
 import numpy as np
@@ -737,7 +737,3 @@ if uploaded_file:
 
 else:
     st.info("👈 กรุณาเลือกอัปโหลดไฟล์ (.csv) ที่เมนูด้านซ้าย")
-'''
-
-compile(code, '<string>', 'exec')
-print("Compiled python code perfectly!")
