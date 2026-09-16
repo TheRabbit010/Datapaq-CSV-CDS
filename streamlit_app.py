@@ -208,7 +208,7 @@ def hex_to_rgba(hex_str, opacity=0.25):
     b = int(hex_str[4:6], 16)
     return f"rgba({r}, {g}, {b}, {opacity})"
 
-# 5. ฟังก์ชันอ่านไฟล์ CSV และดึงข้อมูล (รองรับค่า *OC* สายหลุด)
+# 5. ฟังก์ชันอ่านไฟล์ CSV และดึงข้อมูล (ถอดรหัส Mapping ช่องสัญญาณแบบไดนามิก)
 def parse_single_file(uploaded_file):
     uploaded_file.seek(0)
     raw_bytes = uploaded_file.read()
@@ -227,6 +227,7 @@ def parse_single_file(uploaded_file):
     lines = text_content.splitlines()
     
     probe_labels = {}
+    probe_channel_map = {}  # แผนผังแมปคอลัมน์ข้อมูลเข้ากับแชนเนลจริงของ Datapaq (#probe number #X = Y)
     data_rows = []
     
     metadata = {
@@ -265,6 +266,13 @@ def parse_single_file(uploaded_file):
                     metadata["site"] = val if (val and val != "-") else "VSTS / Power Chonburi"
                 elif "note" in key.lower():
                     metadata["note_1"] = val
+                elif key.lower().startswith("probe number #"):
+                    try:
+                        p_num = int(key.lower().replace("probe number #", "").strip())
+                        ch_num = int(val)
+                        probe_channel_map[p_num] = ch_num
+                    except ValueError:
+                        pass
                 elif key.isdigit():
                     ch_num = int(key)
                     probe_labels[ch_num] = val
@@ -288,23 +296,13 @@ def parse_single_file(uploaded_file):
                     except ValueError:
                         dist_val = 0.0
                         
-                    # แปลงค่าโพรบที่ไม่ใช่ตัวเลข (เช่น *OC*) เป็น np.nan
-                    probe_vals = []
-                    for p in parts[2:10]:
-                        try:
-                            probe_vals.append(float(p))
-                        except ValueError:
-                            probe_vals.append(np.nan)
-                    
-                    # เติม np.nan ให้ครบ 8 Probe หากแชนแนลเปิดไม่ครบ
-                    while len(probe_vals) < 8:
-                        probe_vals.append(np.nan)
+                    raw_vals = parts[2:]
                     
                     data_rows.append({
                         "elapsed_sec": elapsed_sec,
                         "time_str": time_str,
                         "dist_val": dist_val,
-                        "probes": probe_vals
+                        "raw_vals": raw_vals
                     })
                 except Exception:
                     continue
@@ -320,12 +318,29 @@ def parse_single_file(uploaded_file):
             "Distance (m)": round(row["dist_val"], 2)
         }
         
+        # ตั้งค่าตั้งต้นของ Probe #1 - #8 เป็น NaN
+        ch_values = {ch: np.nan for ch in range(1, 9)}
+        raw_vals = row["raw_vals"]
+        
+        # จับคู่คอลัมน์ข้อมูลกับแชนเนลจริงของเครื่อง Datapaq
+        for idx, val_str in enumerate(raw_vals[:8]):
+            col_idx = idx + 1
+            ch_num = probe_channel_map.get(col_idx, col_idx)
+            
+            try:
+                val_num = float(val_str)
+            except ValueError:
+                val_num = np.nan
+                
+            if 1 <= ch_num <= 8:
+                ch_values[ch_num] = val_num
+
         for i in range(1, 9):
             col_label = f"Probe #{i}"
             if i in probe_labels:
                 lbl = probe_labels[i]
                 col_label = f"Probe #{i}: {lbl[:15]}..." if len(lbl) > 15 else f"Probe #{i}: {lbl}"
-            row_dict[col_label] = row["probes"][i-1]
+            row_dict[col_label] = ch_values[i]
             
         parsed_data.append(row_dict)
 
@@ -470,15 +485,17 @@ if uploaded_file:
 
         probe_cols = [c for c in df_chart.columns if c.startswith("Probe #")]
         for idx, col in enumerate(probe_cols[:8]):
-            fig.add_trace(
-                go.Scatter(
-                    x=df_chart["Time (HH:MM:SS)"],
-                    y=df_chart[col],
-                    name=col,
-                    mode="lines",
-                    line=dict(color=probe_colors[idx % len(probe_colors)], width=2)
+            # วาดเฉพาะโพรบที่มีข้อมูลจริง
+            if df_chart[col].notna().any():
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_chart["Time (HH:MM:SS)"],
+                        y=df_chart[col],
+                        name=col,
+                        mode="lines",
+                        line=dict(color=probe_colors[idx % len(probe_colors)], width=2)
+                    )
                 )
-            )
 
         fig.add_trace(
             go.Scatter(
@@ -705,7 +722,7 @@ if uploaded_file:
 
         st.dataframe(display_summary_df, use_container_width=True, hide_index=True)
 
-        # 📌 อัปเดตคำอธิบายเกณฑ์มาตรฐาน (Process Standards Legend) ให้ตรงตามภาพอ้างอิง
+        # 📌 คำอธิบายเกณฑ์มาตรฐาน (Process Standards Legend)
         st.markdown("""
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
                 <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards):</b><br>
