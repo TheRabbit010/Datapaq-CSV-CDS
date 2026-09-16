@@ -1,4 +1,4 @@
-import io
+code = '''import io
 import openpyxl
 import pandas as pd
 import numpy as np
@@ -188,7 +188,7 @@ st.markdown("""
 # 3. แสดงชื่อโปรแกรมหลัก
 st.title("🏭 Datapaq NB1 CDS")
 
-# 4. ฟังก์ชันแปลงวินาทีเป็นรูปแบบ h:mm:ss หรือ mm:ss
+# 4. ฟังก์ชันแปลงวินาทีเป็นรูปแบบ h:mm:ss
 def format_seconds_to_time(total_seconds):
     if pd.isna(total_seconds) or total_seconds <= 0:
         return "0:00:00"
@@ -422,7 +422,7 @@ if uploaded_file:
                 {"Start Time": "00:32:03", "End Time": "00:32:28", "Zone Name": "XFER#2", "Color": "#023E8A"},
                 {"Start Time": "00:32:29", "End Time": "00:33:21", "Zone Name": "AirCool#1", "Color": "#48CAE4"},
                 {"Start Time": "00:33:22", "End Time": "00:34:15", "Zone Name": "AirCool#2", "Color": "#90E0EF"},
-                {"Start Time": "00:34:16", "End Time": "00:35:35", "Zone Name": "Exit", "Color": "#CAF0F8"}
+                {"Start Time": "00:34:16", "End Time": "00:38:00", "Zone Name": "Exit", "Color": "#CAF0F8"}
             ]
             angle_setting = -90
         else:
@@ -431,9 +431,15 @@ if uploaded_file:
                 {"Start Time": "00:04:59", "End Time": "00:15:34", "Zone Name": "Debinder", "Color": "#E74C3C"},   
                 {"Start Time": "00:15:35", "End Time": "00:27:37", "Zone Name": "Brazing", "Color": "#FF0033"},    
                 {"Start Time": "00:27:38", "End Time": "00:34:15", "Zone Name": "Cool", "Color": "#00B4D8"},       
-                {"Start Time": "00:34:16", "End Time": "00:35:35", "Zone Name": "Exit", "Color": "#90E0EF"}        
+                {"Start Time": "00:34:16", "End Time": "00:38:00", "Zone Name": "Exit", "Color": "#90E0EF"}        
             ]
             angle_setting = 0
+
+        # 📌 ตัดข้อมูลกราฟให้แสดงตั้งแต่ 0:00:00 ถึง 0:38:00 (2280 วินาที)
+        max_view_sec = 2280
+        df_chart = df[df["ElapsedSeconds"] <= max_view_sec].copy()
+        if df_chart.empty:
+            df_chart = df.copy()
 
         # 📋 แสดงผล Header Metadata
         col_h1, col_h2 = st.columns(2)
@@ -462,12 +468,12 @@ if uploaded_file:
             "#FF00FF", "#DAA520", "#800080", "#00FFFF"
         ]
 
-        probe_cols = [c for c in df.columns if c.startswith("Probe #")]
+        probe_cols = [c for c in df_chart.columns if c.startswith("Probe #")]
         for idx, col in enumerate(probe_cols[:8]):
             fig.add_trace(
                 go.Scatter(
-                    x=df["Time (HH:MM:SS)"],
-                    y=df[col],
+                    x=df_chart["Time (HH:MM:SS)"],
+                    y=df_chart[col],
                     name=col,
                     mode="lines",
                     line=dict(color=probe_colors[idx % len(probe_colors)], width=2)
@@ -476,8 +482,8 @@ if uploaded_file:
 
         fig.add_trace(
             go.Scatter(
-                x=df["Distance (m)"],
-                y=[None] * len(df),
+                x=df_chart["Distance (m)"],
+                y=[None] * len(df_chart),
                 xaxis="x2",
                 showlegend=False,
                 hoverinfo="skip"
@@ -516,13 +522,13 @@ if uploaded_file:
             )
 
         # คำนวณช่วง Tick สำหรับแกน Time ให้เหมาะสม
-        step_tick = max(1, len(df) // 16)
-        tick_indices = list(range(0, len(df), step_tick))
-        if (len(df) - 1) not in tick_indices:
-            tick_indices.append(len(df) - 1)
+        step_tick = max(1, len(df_chart) // 16)
+        tick_indices = list(range(0, len(df_chart), step_tick))
+        if (len(df_chart) - 1) not in tick_indices:
+            tick_indices.append(len(df_chart) - 1)
             
         # สร้างรายการ Tick สำหรับแกน Distance โดยเฉพาะ
-        max_dist = df["Distance (m)"].max() if not df.empty else 50.0
+        max_dist = df_chart["Distance (m)"].max() if not df_chart.empty else 50.0
         if max_dist <= 20:
             dist_dtick = 1.0
         elif max_dist <= 50:
@@ -560,7 +566,7 @@ if uploaded_file:
             xaxis=dict(
                 title=dict(text="Time (hh:mm:ss)", font=dict(color="#FFFFFF", size=11)),
                 tickmode="array",
-                tickvals=df.loc[tick_indices, "Time (HH:MM:SS)"].tolist(),
+                tickvals=df_chart.loc[tick_indices, "Time (HH:MM:SS)"].tolist(),
                 tickfont=dict(color="#CCCCCC", size=10),
                 showgrid=True,
                 gridcolor="rgba(255,255,255,0.08)",
@@ -640,17 +646,6 @@ if uploaded_file:
                     ordered_cols.append((p_num, c))
                     break
 
-        # คำนวณ Pitch Max, Pitch Min, Pitch AVG สำหรับ Brazing Zone ของโพรบที่ใช้งานได้
-        valid_br_maxs = []
-        for p_num, col_name in ordered_cols:
-            val = brazing_max_subset[col_name].max() if not brazing_max_subset.empty else np.nan
-            if pd.notna(val):
-                valid_br_maxs.append(val)
-
-        pitch_max_str = f"{max(valid_br_maxs):.1f}" if valid_br_maxs else "***"
-        pitch_min_str = f"{min(valid_br_maxs):.1f}" if valid_br_maxs else "***"
-        pitch_avg_str = f"{np.mean(valid_br_maxs):.1f}" if valid_br_maxs else "***"
-
         summary_rows = []
         for p_num, col_name in ordered_cols:
             # 📌 กำหนดตำแหน่งหัววัดคงที่: PB#1-4 = Bottom, PB#5-8 = Top
@@ -680,9 +675,6 @@ if uploaded_file:
                 short_pb_name,
                 location,
                 br_max,
-                pitch_max_str,
-                pitch_min_str,
-                pitch_avg_str,
                 db_max,
                 d_max,
                 br_dwell_str,
@@ -694,9 +686,6 @@ if uploaded_file:
             ("", "Probe"),
             ("", "Location"),
             ("Brazing zone", "Max temp / probe (°C)"),
-            ("Brazing zone", "Max temp / pitch (°C)"),
-            ("Brazing zone", "Min temp / pitch (°C)"),
-            ("Brazing zone", "AVG temp / pitch (°C)"),
             ("Debinder", "Max temp / probe (°C)"),
             ("Dryer", "Max temp / probe (°C)"),
             ("Brazing zone", "at 577°C / probe"),
@@ -748,3 +737,7 @@ if uploaded_file:
 
 else:
     st.info("👈 กรุณาเลือกอัปโหลดไฟล์ (.csv) ที่เมนูด้านซ้าย")
+'''
+
+compile(code, '<string>', 'exec')
+print("Compiled python code perfectly!")
