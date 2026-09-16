@@ -644,11 +644,9 @@ if uploaded_file:
 
         summary_rows = []
         for p_num, col_name in ordered_cols:
-            # 📌 กำหนดตำแหน่งตามมาตรฐาน: PB#1-4 = Bottom, PB#5-8 = Top
             location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
             short_pb_name = f"PB#{p_num}"
             
-            # ตรวจสอบความถูกต้องของโพรบ (ป้องกันกรณีโพรบหลุด/หลวม หรือ *OC*)
             probe_series = df[col_name]
             is_probe_valid = probe_series.notna().any()
             
@@ -707,12 +705,15 @@ if uploaded_file:
 
         st.dataframe(display_summary_df, use_container_width=True, hide_index=True)
 
-        # คำอธิบายเกณฑ์มาตรฐาน (Process Standards Legend)
+        # 📌 อัปเดตคำอธิบายเกณฑ์มาตรฐาน (Process Standards Legend) ให้ตรงตามภาพอ้างอิง
         st.markdown("""
-            <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px;">
+            <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
                 <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards):</b><br>
                 • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
-                • <b>Brazing Dwell Time:</b> at 577°C / probe: <b>4:00 - 6:30 min (หรือ 4:00 - 7:45 min ตามตำแหน่งชิ้นงาน)</b><br>
+                • <b>Brazing Dwell Time (at 577°C / probe):</b><br>
+                &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 6.30 min</b> (except end cap RD > 2.00 min)<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 7.45 min</b> for middle center & 1st tube after side plate.<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;• <b>2.00 - 7.45 min</b> for end cap RD , middle of the connector block & coldest block.<br>
                 • <b>Debinder Dwell Time:</b> at 300°C / probe: <b>> 2:30 min (>150s)</b><br>
                 • <b>Dryer Dwell Time:</b> at 200°C / probe: <b>> 1:30 min (>90s)</b>
             </div>
