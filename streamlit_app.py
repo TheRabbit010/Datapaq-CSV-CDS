@@ -8,7 +8,7 @@ import streamlit as st
 
 # 1. ตั้งค่า Page Config
 st.set_page_config(
-    page_title="Datapaq NB1",
+    page_title="Datapaq NB1 CDS",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -186,7 +186,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. แสดงชื่อโปรแกรมหลัก
-st.title("🏭 Datapaq NB1")
+st.title("🏭 Datapaq NB1 CDS")
 
 # 4. ฟังก์ชันแปลงวินาทีเป็นรูปแบบ mm:ss หรือ hh:mm:ss
 def format_seconds_to_time(total_seconds):
@@ -761,7 +761,7 @@ if uploaded_files:
             with col_opt1:
                 custom_filename = st.text_input(
                     "ตั้งชื่อไฟล์ดาวน์โหลด:", 
-                    value="datapaq_nb1_8probes_data.xlsx"
+                    value="datapaq_nb1_cds_8probes_data.xlsx"
                 )
                 if not custom_filename.endswith('.xlsx'):
                     custom_filename += '.xlsx'
