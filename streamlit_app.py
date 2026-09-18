@@ -666,7 +666,7 @@ if uploaded_file:
             d_val = dryer_subset[col_name].max() if (is_valid and not dryer_subset.empty) else np.nan
             d_max = f"{d_val:.1f}" if pd.notna(d_val) else "***"
             
-            # Dwell Times (คำนวณตามสูตร Datapaq Duration)
+            # Dwell Times (คำนวณจากคอลัมน์โพรบจริงโดยตรง)
             if is_valid and pd.notna(br_val):
                 br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
                 br_dwell_str = format_seconds_to_time(br_cnt)
