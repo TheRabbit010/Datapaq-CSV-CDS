@@ -649,7 +649,6 @@ if uploaded_file:
             location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
             short_pb_name = f"PB#{p_num}"
             
-            # สลับเฉพาะ Probe 3 และ Probe 4 ในส่วน Debinder และ Dryer ให้ตรงตามไฟล์อ้างอิง
             target_col_db_d = col_name
             if p_num == 3:
                 target_col_db_d = next((c for p, c in ordered_cols if p == 4), col_name)
@@ -725,7 +724,7 @@ if uploaded_file:
 
         st.markdown("""
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
-                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E):</b><br>
+                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E + DSR TDOC_101182039 CDS BRAZING CYCLE):</b><br>
                 • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
                 • <b>Brazing Dwell Time (at 577°C / probe):</b><br>
                 &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 6.30 min</b> (except end cap RD > 2.00 min)<br>
