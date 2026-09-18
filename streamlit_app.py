@@ -636,59 +636,57 @@ if uploaded_file:
         brazing_ht_subset = df[(df["ElapsedSeconds"] >= 0)]
         brazing_max_subset = df[(df["ElapsedSeconds"] >= 900) & (df["ElapsedSeconds"] <= 1750)]
 
-        probe_order = [1, 2, 3, 4, 5, 6, 7, 8]
-        ordered_cols = []
-        for p_num in probe_order:
-            for c in probe_cols[:8]:
-                if f"Probe #{p_num}" in c or f"Probe #{p_num}:" in c:
-                    ordered_cols.append((p_num, c))
-                    break
+        probe_cols = [c for c in df.columns if c.startswith("Probe #")]
 
         summary_rows = []
-        for p_num, col_name in ordered_cols:
+        for p_num in range(1, 9):
+            col_name = None
+            for c in probe_cols[:8]:
+                if f"Probe #{p_num}:" in c or c == f"Probe #{p_num}":
+                    col_name = c
+                    break
+
             location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
             short_pb_name = f"PB#{p_num}"
             
-            target_col_db_d = col_name
-            if p_num == 3:
-                target_col_db_d = next((c for p, c in ordered_cols if p == 4), col_name)
-            elif p_num == 4:
-                target_col_db_d = next((c for p, c in ordered_cols if p == 3), col_name)
+            if not col_name or col_name not in df.columns:
+                summary_rows.append([short_pb_name, location, "***", "***", "***", "***", "***", "***", "***"])
+                continue
             
             probe_series = df[col_name]
-            db_d_series = df[target_col_db_d]
-            
-            is_probe_valid = probe_series.notna().any()
-            is_db_d_valid = db_d_series.notna().any()
+            is_valid = probe_series.notna().any()
             
             # Max Temp
-            br_val = brazing_max_subset[col_name].max() if (is_probe_valid and not brazing_max_subset.empty) else np.nan
+            br_val = brazing_max_subset[col_name].max() if (is_valid and not brazing_max_subset.empty) else np.nan
             br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
             
-            db_val = debinder_subset[target_col_db_d].max() if (is_db_d_valid and not debinder_subset.empty) else np.nan
+            db_val = debinder_subset[col_name].max() if (is_valid and not debinder_subset.empty) else np.nan
             db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
             
-            d_val = dryer_subset[target_col_db_d].max() if (is_db_d_valid and not dryer_subset.empty) else np.nan
+            d_val = dryer_subset[col_name].max() if (is_valid and not dryer_subset.empty) else np.nan
             d_max = f"{d_val:.1f}" if pd.notna(d_val) else "***"
             
-            # Dwell Times
-            if is_probe_valid and pd.notna(br_val):
-                br_dwell_sec = (brazing_ht_subset[col_name] >= 577.0).sum() if not brazing_ht_subset.empty else 0
-                br_dwell_str = format_seconds_to_time(br_dwell_sec)
+            # Dwell Times (คำนวณตามสูตร Datapaq Duration)
+            if is_valid and pd.notna(br_val):
+                br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
+                br_dwell_str = format_seconds_to_time(br_cnt)
             else:
                 br_dwell_str = "***"
                 
-            if is_db_d_valid and pd.notna(db_val):
-                db_dwell_sec = (debinder_subset[target_col_db_d] >= 300.0).sum() if not debinder_subset.empty else 0
+            if is_valid and pd.notna(db_val):
+                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
+                db_dwell_sec = max(0, db_cnt - 1) if db_cnt > 0 else 0
                 db_dwell_str = format_seconds_to_time(db_dwell_sec)
             else:
                 db_dwell_str = "***"
                 
-            if is_db_d_valid and pd.notna(d_val):
-                d_dwell_sec = (dryer_subset[target_col_db_d] >= 200.0).sum() if not dryer_subset.empty else 0
-                d_dwell_str = format_seconds_to_time(d_dwell_sec)
+            if is_valid and pd.notna(d_val):
+                d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum()
+                d_dwell_200_sec = max(0, d_cnt_200 - 1) if d_cnt_200 > 0 else 0
+                d_dwell_str = format_seconds_to_time(d_dwell_200_sec)
 
-                d_dwell_150_sec = (dryer_subset[target_col_db_d] >= 150.0).sum() if not dryer_subset.empty else 0
+                d_cnt_150 = (dryer_subset[col_name] >= 150.0).sum()
+                d_dwell_150_sec = max(0, d_cnt_150 - 1) if d_cnt_150 > 0 else 0
                 d_dwell_150_str = format_seconds_to_time(d_dwell_150_sec)
             else:
                 d_dwell_str = "***"
@@ -724,7 +722,7 @@ if uploaded_file:
 
         st.markdown("""
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
-                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E + DSR TDOC_101182039 CDS BRAZING CYCLE):</b><br>
+                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E DSR TDOC_101182039 CDS BRAZING CYCLE):</b><br>
                 • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
                 • <b>Brazing Dwell Time (at 577°C / probe):</b><br>
                 &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 6.30 min</b> (except end cap RD > 2.00 min)<br>
