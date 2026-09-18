@@ -234,6 +234,7 @@ def parse_single_file(uploaded_file):
         "paqfile start date": "-",
         "paqfile start time": "-",
         "title": "-",
+        "logger": "-",
         "operator": "-",
         "product": "CONDENSER",
         "site": "VSTS / Power Chonburi",
@@ -258,6 +259,8 @@ def parse_single_file(uploaded_file):
                     metadata["paqfile start date"] = val
                 elif key.lower() == "paqfile start time":
                     metadata["paqfile start time"] = val
+                elif "logger" in key.lower():
+                    metadata["logger"] = val
                 elif key.lower() == "operator":
                     metadata["operator"] = val
                 elif key.lower() == "product":
@@ -463,6 +466,7 @@ if uploaded_file:
         with col_h2:
             st.markdown(f"""
                 <div class="raw-header-box">
+                    <div><span class="raw-header-key">#logger s/n</span> = <span class="raw-header-val">{metadata.get('logger', '-')}</span></div>
                     <div><span class="raw-header-key">#operator</span> = <span class="raw-header-val">{metadata.get('operator', '-')}</span></div>
                     <div><span class="raw-header-key">#product</span> = <span class="raw-header-val">{metadata.get('product', 'CONDENSER')}</span></div>
                     <div><span class="raw-header-key">#site</span> = <span class="raw-header-val">{metadata.get('site', 'VSTS / Power Chonburi')}</span></div>
@@ -721,7 +725,7 @@ if uploaded_file:
 
         st.markdown("""
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
-                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards):</b><br>
+                <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E):</b><br>
                 • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
                 • <b>Brazing Dwell Time (at 577°C / probe):</b><br>
                 &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 6.30 min</b> (except end cap RD > 2.00 min)<br>
