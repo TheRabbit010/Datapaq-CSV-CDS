@@ -970,42 +970,23 @@ if uploaded_file:
             label_part = col_name.split(":", 1)[1].strip() if ":" in col_name else ""
             lbl_upper = label_part.upper().strip()
 
-            # แยกคำอธิบายเป็นส่วนหลัก (Core) และส่วนระบุตำแหน่งย่อย (Sub-location)
-            parts = [p.strip() for p in lbl_upper.replace("/", "-").split("-") if p.strip()]
-            sub_text = " ".join(parts[1:]) if len(parts) > 1 else ""
+            # ระบุตำแหน่งตาม Core Location (Bot core -> Bottom / Top core -> Top) ให้ตรงกับรายงานอ้างอิง
+            primary_part = re.split(r"[-/]", lbl_upper)[0].strip() if lbl_upper else ""
 
-            # 1. ตรวจสอบจากตำแหน่งย่อยก่อน (Sub-location) เพื่อให้ตรงตามตำแหน่งเจาะระบุเฉพาะ
-            location = None
-            if sub_text:
-                if "BOTTOM" in sub_text or "BOT" in sub_text:
-                    location = "Bottom"
-                elif "TOP" in sub_text:
-                    location = "Top"
-                elif "FRONT" in sub_text:
-                    location = "Front"
-                elif "REAR" in sub_text:
-                    location = "Rear"
-                elif "RIGHT" in sub_text:
-                    location = "Right"
-                elif "LEFT" in sub_text:
-                    location = "Left"
-
-            # 2. หากในตำแหน่งย่อยไม่ได้ระบุ Top/Bottom ให้ตรวจสอบจากข้อความทั้งหมด (Full Label/Core)
-            if not location:
-                if "BOTTOM" in lbl_upper or "BOT" in lbl_upper:
-                    location = "Bottom"
-                elif "TOP" in lbl_upper:
-                    location = "Top"
-                elif "FRONT" in lbl_upper:
-                    location = "Front"
-                elif "REAR" in lbl_upper:
-                    location = "Rear"
-                elif "RIGHT" in lbl_upper:
-                    location = "Right"
-                elif "LEFT" in lbl_upper:
-                    location = "Left"
-                else:
-                    location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
+            if "BOT" in primary_part or "BOTTOM" in primary_part or "BOT CORE" in lbl_upper:
+                location = "Bottom"
+            elif "TOP" in primary_part or "TOP CORE" in lbl_upper:
+                location = "Top"
+            elif "FRONT" in primary_part or "FRONT" in lbl_upper:
+                location = "Front"
+            elif "REAR" in primary_part or "REAR" in lbl_upper:
+                location = "Rear"
+            elif "RIGHT" in primary_part:
+                location = "Right"
+            elif "LEFT" in primary_part:
+                location = "Left"
+            else:
+                location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
 
             short_pb_name = f"PB#{p_num}"
             probe_series = df[col_name]
