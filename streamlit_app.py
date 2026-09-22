@@ -211,9 +211,9 @@ def parse_time_to_sec(val):
     return None
 
 
-# ฟังก์ชันตรวจสอบเกณฑ์มาตรฐาน CDS (PRCNVR02004 E DSR TDOC_101182039 CDS BRAZING CYCLE)
+# ฟังก์ชันตรวจสอบเกณฑ์มาตรฐาน CDS
 def is_cds_param_pass(val, param_type):
-    if pd.isna(val) or val == "-" or str(val).strip() in ["", "***", "nan", "NaN"]:
+    if pd.isna(val) or val in ["-", "***"] or str(val).strip() in ["", "***", "nan", "NaN"]:
         return True
 
     try:
@@ -230,29 +230,19 @@ def is_cds_param_pass(val, param_type):
             sec = parse_time_to_sec(val)
             if sec is None:
                 return True
-            # 2.00 - 7.45 min -> 120s - 465s
             return 120 <= sec <= 465
 
         elif param_type == "db_300":
             sec = parse_time_to_sec(val)
             if sec is None:
                 return True
-            # > 2:30 min -> > 150s
             return sec > 150
 
         elif param_type == "dr_200":
             sec = parse_time_to_sec(val)
             if sec is None:
                 return True
-            # > 1:30 min -> > 90s
             return sec > 90
-
-        elif param_type == "dr_150":
-            sec = parse_time_to_sec(val)
-            if sec is None:
-                return True
-            # >= 1:30 min -> >= 90s
-            return sec >= 90
 
     except Exception:
         return True
@@ -274,7 +264,7 @@ def safe_float(val):
     if pd.isna(val):
         return np.nan
     val_str = str(val).strip()
-    if not val_str or val_str.upper() in ["*OC*", "OC", "NC", "-", "NAN"]:
+    if not val_str or val_str.upper() in ["*OC*", "OC", "NC", "-", "NAN", "***"]:
         return np.nan
     try:
         return float(val_str)
@@ -282,7 +272,7 @@ def safe_float(val):
         return np.nan
 
 
-# ฟังก์ชันกำจัดอักขระต้องห้ามใน openpyxl ป้องกันปัญหา IllegalCharacterError
+# ฟังก์ชันกำจัดอักขระต้องห้ามใน openpyxl
 def clean_dataframe_for_excel(df_to_clean):
     if df_to_clean is None or df_to_clean.empty:
         return df_to_clean
@@ -317,7 +307,7 @@ def clean_dataframe_for_excel(df_to_clean):
     return df_clean
 
 
-# 5. ฟังก์ชันอ่านไฟล์ CSV และดึงข้อมูลแบบยืดหยุ่นรองรับจำนวนโพรบไดนามิก
+# 5. ฟังก์ชันอ่านไฟล์ CSV แบบป้องกันการเลื่อนคอลัมน์
 def parse_single_file(uploaded_file):
     uploaded_file.seek(0)
     raw_bytes = uploaded_file.read()
@@ -397,7 +387,8 @@ def parse_single_file(uploaded_file):
                     ch_num = int(key)
                     probe_labels[ch_num] = val
         else:
-            parts = [p.strip() for p in line_str.split(",") if p.strip() != ""]
+            # FIX: รักษาตำแหน่งของคอลัมน์โดยไม่ตัดช่องว่างทิ้ง
+            parts = [p.strip() for p in line_str.split(",")]
             if len(parts) >= 3:
                 try:
                     time_str = parts[0].strip()
@@ -429,7 +420,6 @@ def parse_single_file(uploaded_file):
     if not data_rows:
         return pd.DataFrame(), metadata
 
-    # คำนวณจำนวนโพรบสูงสุดจากข้อมูลไดนามิก
     max_raw_len = max(len(r["raw_vals"]) for r in data_rows) if data_rows else 0
     all_probe_nums = (
         [max_raw_len, num_channels] +
@@ -478,7 +468,7 @@ def parse_single_file(uploaded_file):
     return df_res, metadata
 
 
-# ฟังก์ชันแปลง DataFrame + Summary Table + แนบรูปกราฟลงในไฟล์ Excel (.xlsx)
+# ฟังก์ชันแปลงเป็นไฟล์ Excel
 def to_excel_bytes(dataframe, summary_dataframe=None, fig_plotly=None):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -517,7 +507,6 @@ def to_excel_bytes(dataframe, summary_dataframe=None, fig_plotly=None):
 # 6. เมนู Sidebar
 st.sidebar.header("📁 เมนูอัปโหลดข้อมูล")
 
-# อัปโหลดเฉพาะไฟล์ CSV เท่านั้น
 uploaded_file = st.sidebar.file_uploader(
     "อัปโหลดไฟล์ CSV (.csv)",
     type=["csv"],
@@ -550,178 +539,38 @@ if uploaded_file:
 
         if color_shading_mode == "แสดงสีตามโซน (By Zone)":
             zones_data = [
-                {
-                    "Start Time": "00:00:00",
-                    "End Time": "00:02:14",
-                    "Zone Name": "Dryer Z#1",
-                    "Color": "#F7DC6F",
-                },
-                {
-                    "Start Time": "00:02:15",
-                    "End Time": "00:04:28",
-                    "Zone Name": "Dryer Z#2",
-                    "Color": "#F39C12",
-                },
-                {
-                    "Start Time": "00:04:29",
-                    "End Time": "00:04:58",
-                    "Zone Name": "EXT Dryer",
-                    "Color": "#E67E22",
-                },
-                {
-                    "Start Time": "00:04:59",
-                    "End Time": "00:05:26",
-                    "Zone Name": "ENT DB",
-                    "Color": "#D35400",
-                },
-                {
-                    "Start Time": "00:05:27",
-                    "End Time": "00:07:41",
-                    "Zone Name": "DB Z#1",
-                    "Color": "#E74C3C",
-                },
-                {
-                    "Start Time": "00:07:42",
-                    "End Time": "00:09:32",
-                    "Zone Name": "DB Z#2",
-                    "Color": "#E63946",
-                },
-                {
-                    "Start Time": "00:09:33",
-                    "End Time": "00:11:23",
-                    "Zone Name": "DB Z#3",
-                    "Color": "#D90429",
-                },
-                {
-                    "Start Time": "00:11:24",
-                    "End Time": "00:13:38",
-                    "Zone Name": "DB Z#4",
-                    "Color": "#C1121F",
-                },
-                {
-                    "Start Time": "00:13:39",
-                    "End Time": "00:15:34",
-                    "Zone Name": "XFER#1",
-                    "Color": "#9B59B6",
-                },
-                {
-                    "Start Time": "00:15:35",
-                    "End Time": "00:17:48",
-                    "Zone Name": "Z#1",
-                    "Color": "#FF0033",
-                },
-                {
-                    "Start Time": "00:17:49",
-                    "End Time": "00:19:43",
-                    "Zone Name": "Z#2",
-                    "Color": "#E6002E",
-                },
-                {
-                    "Start Time": "00:19:44",
-                    "End Time": "00:21:40",
-                    "Zone Name": "Z#3",
-                    "Color": "#CC0029",
-                },
-                {
-                    "Start Time": "00:21:41",
-                    "End Time": "00:23:07",
-                    "Zone Name": "Z#4",
-                    "Color": "#B30024",
-                },
-                {
-                    "Start Time": "00:23:08",
-                    "End Time": "00:24:33",
-                    "Zone Name": "Z#5",
-                    "Color": "#CC0029",
-                },
-                {
-                    "Start Time": "00:24:34",
-                    "End Time": "00:25:59",
-                    "Zone Name": "Z#6",
-                    "Color": "#E6002E",
-                },
-                {
-                    "Start Time": "00:26:00",
-                    "End Time": "00:27:37",
-                    "Zone Name": "Z#7",
-                    "Color": "#FF0033",
-                },
-                {
-                    "Start Time": "00:27:38",
-                    "End Time": "00:29:19",
-                    "Zone Name": "WatCool#1",
-                    "Color": "#00B4D8",
-                },
-                {
-                    "Start Time": "00:29:20",
-                    "End Time": "00:30:41",
-                    "Zone Name": "WatCool#2",
-                    "Color": "#0096C7",
-                },
-                {
-                    "Start Time": "00:30:42",
-                    "End Time": "00:32:02",
-                    "Zone Name": "Exit curtain box",
-                    "Color": "#0077B6",
-                },
-                {
-                    "Start Time": "00:32:03",
-                    "End Time": "00:32:28",
-                    "Zone Name": "XFER#2",
-                    "Color": "#023E8A",
-                },
-                {
-                    "Start Time": "00:32:29",
-                    "End Time": "00:33:21",
-                    "Zone Name": "AirCool#1",
-                    "Color": "#48CAE4",
-                },
-                {
-                    "Start Time": "00:33:22",
-                    "End Time": "00:34:15",
-                    "Zone Name": "AirCool#2",
-                    "Color": "#90E0EF",
-                },
-                {
-                    "Start Time": "00:34:16",
-                    "End Time": "00:38:00",
-                    "Zone Name": "Exit",
-                    "Color": "#CAF0F8",
-                },
+                {"Start Time": "00:00:00", "End Time": "00:02:14", "Zone Name": "Dryer Z#1", "Color": "#F7DC6F"},
+                {"Start Time": "00:02:15", "End Time": "00:04:28", "Zone Name": "Dryer Z#2", "Color": "#F39C12"},
+                {"Start Time": "00:04:29", "End Time": "00:04:58", "Zone Name": "EXT Dryer", "Color": "#E67E22"},
+                {"Start Time": "00:04:59", "End Time": "00:05:26", "Zone Name": "ENT DB", "Color": "#D35400"},
+                {"Start Time": "00:05:27", "End Time": "00:07:41", "Zone Name": "DB Z#1", "Color": "#E74C3C"},
+                {"Start Time": "00:07:42", "End Time": "00:09:32", "Zone Name": "DB Z#2", "Color": "#E63946"},
+                {"Start Time": "00:09:33", "End Time": "00:11:23", "Zone Name": "DB Z#3", "Color": "#D90429"},
+                {"Start Time": "00:11:24", "End Time": "00:13:38", "Zone Name": "DB Z#4", "Color": "#C1121F"},
+                {"Start Time": "00:13:39", "End Time": "00:15:34", "Zone Name": "XFER#1", "Color": "#9B59B6"},
+                {"Start Time": "00:15:35", "End Time": "00:17:48", "Zone Name": "Z#1", "Color": "#FF0033"},
+                {"Start Time": "00:17:49", "End Time": "00:19:43", "Zone Name": "Z#2", "Color": "#E6002E"},
+                {"Start Time": "00:19:44", "End Time": "00:21:40", "Zone Name": "Z#3", "Color": "#CC0029"},
+                {"Start Time": "00:21:41", "End Time": "00:23:07", "Zone Name": "Z#4", "Color": "#B30024"},
+                {"Start Time": "00:23:08", "End Time": "00:24:33", "Zone Name": "Z#5", "Color": "#CC0029"},
+                {"Start Time": "00:24:34", "End Time": "00:25:59", "Zone Name": "Z#6", "Color": "#E6002E"},
+                {"Start Time": "00:26:00", "End Time": "00:27:37", "Zone Name": "Z#7", "Color": "#FF0033"},
+                {"Start Time": "00:27:38", "End Time": "00:29:19", "Zone Name": "WatCool#1", "Color": "#00B4D8"},
+                {"Start Time": "00:29:20", "End Time": "00:30:41", "Zone Name": "WatCool#2", "Color": "#0096C7"},
+                {"Start Time": "00:30:42", "End Time": "00:32:02", "Zone Name": "Exit curtain box", "Color": "#0077B6"},
+                {"Start Time": "00:32:03", "End Time": "00:32:28", "Zone Name": "XFER#2", "Color": "#023E8A"},
+                {"Start Time": "00:32:29", "End Time": "00:33:21", "Zone Name": "AirCool#1", "Color": "#48CAE4"},
+                {"Start Time": "00:33:22", "End Time": "00:34:15", "Zone Name": "AirCool#2", "Color": "#90E0EF"},
+                {"Start Time": "00:34:16", "End Time": "00:38:00", "Zone Name": "Exit", "Color": "#CAF0F8"},
             ]
             angle_setting = -90
         else:
             zones_data = [
-                {
-                    "Start Time": "00:00:00",
-                    "End Time": "00:04:58",
-                    "Zone Name": "Dryer",
-                    "Color": "#F39C12",
-                },
-                {
-                    "Start Time": "00:04:59",
-                    "End Time": "00:15:34",
-                    "Zone Name": "Debinder",
-                    "Color": "#E74C3C",
-                },
-                {
-                    "Start Time": "00:15:35",
-                    "End Time": "00:27:37",
-                    "Zone Name": "Brazing",
-                    "Color": "#FF0033",
-                },
-                {
-                    "Start Time": "00:27:38",
-                    "End Time": "00:34:15",
-                    "Zone Name": "Cool",
-                    "Color": "#00B4D8",
-                },
-                {
-                    "Start Time": "00:34:16",
-                    "End Time": "00:38:00",
-                    "Zone Name": "Exit",
-                    "Color": "#90E0EF",
-                },
+                {"Start Time": "00:00:00", "End Time": "00:04:58", "Zone Name": "Dryer", "Color": "#F39C12"},
+                {"Start Time": "00:04:59", "End Time": "00:15:34", "Zone Name": "Debinder", "Color": "#E74C3C"},
+                {"Start Time": "00:15:35", "End Time": "00:27:37", "Zone Name": "Brazing", "Color": "#FF0033"},
+                {"Start Time": "00:27:38", "End Time": "00:34:15", "Zone Name": "Cool", "Color": "#00B4D8"},
+                {"Start Time": "00:34:16", "End Time": "00:38:00", "Zone Name": "Exit", "Color": "#90E0EF"},
             ]
             angle_setting = 0
 
@@ -730,7 +579,7 @@ if uploaded_file:
         if df_chart.empty:
             df_chart = df.copy()
 
-        # 📋 แสดงผล Header Metadata
+        # แสดง Header Metadata
         col_h1, col_h2 = st.columns(2)
         with col_h1:
             st.markdown(
@@ -927,7 +776,6 @@ if uploaded_file:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # 📌 แสดงกล่องข้อความ #note #1 ไว้ใต้รูปภาพกราฟ
         st.markdown(
             f"""
             <div class="raw-header-box" style="margin-top: -10px; margin-bottom: 25px;">
@@ -938,7 +786,7 @@ if uploaded_file:
         )
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า
+        # 📊 ตารางสรุปค่า (อ้างอิงภาพมาตรฐาน image_10a8fd.png)
         # ---------------------------------------------------------
         st.markdown(
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
@@ -949,7 +797,6 @@ if uploaded_file:
         brazing_ht_subset = df[(df["ElapsedSeconds"] >= 0)]
         brazing_max_subset = df[(df["ElapsedSeconds"] >= 900) & (df["ElapsedSeconds"] <= 1750)]
 
-        # จัดหาคอลัมน์โพรบทั้งหมดในไฟล์อย่างยืดหยุ่น
         all_df_probe_cols = [c for c in df.columns if c.startswith("Probe #")]
         probe_map = {}
         for c in all_df_probe_cols:
@@ -960,8 +807,6 @@ if uploaded_file:
                 pass
 
         found_p_nums = sorted(probe_map.keys())
-
-        # จัดลำดับโพรบตามหมายเลขช่องที่มีจริง
         ordered_p_nums = found_p_nums
         ordered_cols = [(p_num, probe_map[p_num]) for p_num in ordered_p_nums if p_num in probe_map]
 
@@ -970,7 +815,6 @@ if uploaded_file:
             label_part = col_name.split(":", 1)[1].strip() if ":" in col_name else ""
             lbl_upper = label_part.upper().strip()
 
-            # ระบุตำแหน่งตาม Core Location (Bot core -> Bottom / Top core -> Top) ให้ตรงกับรายงานอ้างอิง
             primary_part = re.split(r"[-/]", lbl_upper)[0].strip() if lbl_upper else ""
 
             if "BOT" in primary_part or "BOTTOM" in primary_part or "BOT CORE" in lbl_upper:
@@ -992,41 +836,41 @@ if uploaded_file:
             probe_series = df[col_name]
             is_valid = probe_series.notna().any()
 
-            # Max Temp
+            # 1. Max Temp Calculation
             br_val = brazing_max_subset[col_name].max() if (is_valid and not brazing_max_subset.empty) else np.nan
-            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "-"
+            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
 
             db_val = debinder_subset[col_name].max() if (is_valid and not debinder_subset.empty) else np.nan
-            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "-"
+            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
 
             d_val = dryer_subset[col_name].max() if (is_valid and not dryer_subset.empty) else np.nan
-            d_max = f"{d_val:.1f}" if pd.notna(d_val) else "-"
+            if pd.notna(d_val) and d_val > 100.0:
+                d_max = f"{d_val:.1f}"
+            else:
+                d_max = "***"
 
-            # Dwell Times
-            if is_valid and pd.notna(br_val):
+            # 2. Dwell Times Calculation
+            # Brazing at 577°C
+            if is_valid and pd.notna(br_val) and br_val >= 577.0:
                 br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
                 br_dwell_str = format_seconds_to_time(br_cnt)
             else:
-                br_dwell_str = "-"
+                br_dwell_str = "***" if d_max == "***" else "0:00:00"
 
-            if is_valid and pd.notna(db_val):
-                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
-                db_dwell_sec = max(0, db_cnt - 1) if db_cnt > 0 else 0
-                db_dwell_str = format_seconds_to_time(db_dwell_sec)
+            # Debinder at 300°C (FIX: คำนวณแบบแม่นยำไม่หักลบวินาที)
+            if is_valid and pd.notna(db_val) and db_val >= 300.0:
+                db_cnt = (df[col_name] >= 300.0).sum()
+                db_dwell_str = format_seconds_to_time(db_cnt)
             else:
-                db_dwell_str = "-"
+                db_dwell_str = "***" if d_max == "***" else "0:00:00"
 
-            if is_valid and pd.notna(d_val):
+            # Dryer at 200°C
+            if is_valid and pd.notna(d_val) and d_max != "***" and d_val >= 200.0:
                 d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum()
-                d_dwell_200_sec = max(0, d_cnt_200 - 1) if d_cnt_200 > 0 else 0
-                d_dwell_str = format_seconds_to_time(d_dwell_200_sec)
-
-                d_cnt_150 = (dryer_subset[col_name] >= 150.0).sum()
-                d_dwell_150_sec = max(0, d_cnt_150 - 1) if d_cnt_150 > 0 else 0
-                d_dwell_150_str = format_seconds_to_time(d_dwell_150_sec)
+                d_dwell_sec = max(0, d_cnt_200 - 1) if d_cnt_200 > 0 else 0
+                d_dwell_str = format_seconds_to_time(d_dwell_sec)
             else:
-                d_dwell_str = "-"
-                d_dwell_150_str = "-"
+                d_dwell_str = "***"
 
             summary_rows.append([
                 short_pb_name,
@@ -1037,7 +881,6 @@ if uploaded_file:
                 br_dwell_str,
                 db_dwell_str,
                 d_dwell_str,
-                d_dwell_150_str,
             ])
 
         multi_cols = pd.MultiIndex.from_tuples([
@@ -1049,12 +892,10 @@ if uploaded_file:
             ("Brazing zone", "at 577°C / probe"),
             ("Debinder", "at 300°C / probe"),
             ("Dryer", "at 200°C / probe"),
-            ("Dryer", "at 150°C / probe"),
         ])
 
         display_summary_df = pd.DataFrame(summary_rows, columns=multi_cols)
 
-        # แมปคอลัมน์กับพารามิเตอร์เพื่อตรวจสอบเกณฑ์มาตรฐาน CDS
         col_type_mapping = {
             ("Brazing zone", "Max temp / probe (°C)"): "br_max",
             ("Debinder", "Max temp / probe (°C)"): "db_max",
@@ -1062,10 +903,8 @@ if uploaded_file:
             ("Brazing zone", "at 577°C / probe"): "br_577",
             ("Debinder", "at 300°C / probe"): "db_300",
             ("Dryer", "at 200°C / probe"): "dr_200",
-            ("Dryer", "at 150°C / probe"): "dr_150",
         }
 
-        # คำนวณนับจำนวนค่าที่ไม่ผ่านเกณฑ์มาตรฐาน CDS
         ng_count = 0
         for r_idx, row in display_summary_df.iterrows():
             for col_tuple, param_type in col_type_mapping.items():
@@ -1074,7 +913,6 @@ if uploaded_file:
                     if not is_cds_param_pass(val, param_type):
                         ng_count += 1
 
-        # แสดงกล่องแจ้งเตือนสรุปสถานะการผ่านเกณฑ์มาตรฐาน
         if ng_count == 0:
             st.markdown(
                 """
@@ -1094,7 +932,6 @@ if uploaded_file:
                 unsafe_allow_html=True,
             )
 
-        # ฟังก์ชันแต่งสีตาราง (Pandas Styler) ไฮไลท์ช่องที่ไม่ผ่านเกณฑ์แบบสะอาดตาและชัดเจน
         def style_summary_dataframe(df_sum):
             style_df = pd.DataFrame(
                 "background-color: #161b22; color: #ffffff; text-align: center;",
@@ -1151,12 +988,9 @@ if uploaded_file:
             <div style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 18px; font-size: 13px; color: #CCCCCC; margin-top: 10px; line-height: 1.6;">
                 <b style="color: #F0B90B;">📌 เกณฑ์มาตรฐานอ้างอิง (Process Standards : PRCNVR02004 E DSR TDOC_101182039 CDS BRAZING CYCLE):</b><br>
                 • <b>Maximum Temperatures (°C):</b> Brazing Zone: <b>585 - 607 °C</b> | Debinder Zone: <b>300 - 375 °C</b> | Dryer Zone: <b>200 - 350 °C</b><br>
-                • <b>Brazing Dwell Time (at 577°C / probe):</b><br>
-                &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 6.30 min</b> (except end cap RD > 2.00 min)<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;• <b>4.00 - 7.45 min</b> for middle center & 1st tube after side plate.<br>
-                &nbsp;&nbsp;&nbsp;&nbsp;• <b>2.00 - 7.45 min</b> for end cap RD , middle of the connector block & coldest block.<br>
+                • <b>Brazing Dwell Time (at 577°C / probe):</b> <b>2.00 - 7.45 min</b><br>
                 • <b>Debinder Dwell Time:</b> at 300°C / probe: <b>> 2:30 min (>150s)</b><br>
-                • <b>Dryer Dwell Time:</b> at 200°C / probe: <b>> 1:30 min (>90s)</b> | at 150°C / probe: <b>&ge; 1:30 min (&ge;90s)</b>
+                • <b>Dryer Dwell Time:</b> at 200°C / probe: <b>> 1:30 min (>90s)</b>
             </div>
         """,
             unsafe_allow_html=True,
