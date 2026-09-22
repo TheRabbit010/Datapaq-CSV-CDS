@@ -195,32 +195,6 @@ def format_seconds_to_time(total_seconds):
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
-# ฟังก์ชันคำนวณเวลาสะสม (Dwell Time) แม่นยำ
-def calculate_dwell_time(df_subset, col_name, temp_threshold):
-    if df_subset.empty or col_name not in df_subset.columns:
-        return 0.0
-
-    sub = df_subset[["ElapsedSeconds", col_name]].dropna().sort_values("ElapsedSeconds")
-    if sub.empty:
-        return 0.0
-
-    mask = sub[col_name] >= temp_threshold
-    if not mask.any():
-        return 0.0
-
-    dt_series = sub["ElapsedSeconds"].diff()
-    median_dt = dt_series[dt_series > 0].median()
-    if pd.isna(median_dt) or median_dt <= 0:
-        median_dt = 1.0
-
-    dt_series = dt_series.apply(
-        lambda x: x if (pd.notna(x) and 0 < x <= median_dt * 3) else median_dt
-    )
-
-    dwell_seconds = dt_series[mask].sum()
-    return float(dwell_seconds)
-
-
 # ฟังก์ชันแปลงรูปแบบเวลาเป็นวินาที
 def parse_time_to_sec(val):
     if pd.isna(val) or not val or val == "-" or str(val).strip() in ["", "***", "nan", "NaN"]:
@@ -800,15 +774,15 @@ if uploaded_file:
         )
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า (แก้ไขขอบเขตช่วงเวลาประมวลผลมาตรฐาน)
+        # 📊 ตารางสรุปค่า (ขอบเขตเวลาและวิธีการคำนวณแบบมาตรฐาน Datapaq)
         # ---------------------------------------------------------
         st.markdown(
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
         )
 
-        # กำหนดช่วงเวลามาตรฐานให้ตรงกับรายงานอ้างอิง
-        dryer_max_sec = 271
-        db_range_sec = (298, 934)
+        # กำหนดช่วงเวลาประมวลผลมาตรฐาน
+        dryer_max_sec = 270
+        db_range_sec = (298, 840)
 
         dryer_subset = df[(df["ElapsedSeconds"] >= 0) & (df["ElapsedSeconds"] <= dryer_max_sec)]
         debinder_subset = df[(df["ElapsedSeconds"] >= db_range_sec[0]) & (df["ElapsedSeconds"] <= db_range_sec[1])]
@@ -820,38 +794,35 @@ if uploaded_file:
         for c in all_df_probe_cols:
             try:
                 p_num = int(c.split(":")[0].replace("Probe #", "").strip())
-                probe_map[p_num] = c
+                if p_num <= 8:
+                    probe_map[p_num] = c
             except Exception:
                 pass
 
         found_p_nums = [p for p in sorted(probe_map.keys()) if p <= 8]
         ordered_cols = [(p_num, probe_map[p_num]) for p_num in found_p_nums]
 
-        # ดึงค่าสถิติ Dryer และ Dwell Time ของแต่ละโพรบ
+        # ดึงค่าสถิติ Dryer ของแต่ละโพรบ
         dryer_stats = {}
         for p_num, col_name in ordered_cols:
             p_series = df[col_name]
             is_val = p_series.notna().any()
-            
-            if is_val and not dryer_subset.empty:
-                d_val = dryer_subset[col_name].max()
-                d_dwell_sec = calculate_dwell_time(dryer_subset, col_name, 200.0)
-            else:
-                d_val = np.nan
-                d_dwell_sec = 0.0
-
+            d_val = dryer_subset[col_name].max() if (is_val and not dryer_subset.empty) else np.nan
+            d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum() if (is_val and not dryer_subset.empty) else 0
             dryer_stats[p_num] = {
                 "max": d_val,
-                "dwell_sec": d_dwell_sec,
+                "cnt_200": d_cnt_200,
                 "col_name": col_name
             }
 
-        # สลับค่า Dryer ระหว่าง PB#3 (End Cap) และ PB#4 (Inlet Block) หากมีการเสียบช่องวัดสลับกัน
+        # สลับค่า Dryer ระหว่าง PB#3 (End Cap) และ PB#4 (Inlet Block) หากมีกรณีเสียบสายสลับช่องบันทึก
         if 3 in dryer_stats and 4 in dryer_stats:
             p3_lbl = dryer_stats[3]["col_name"].upper()
             p4_lbl = dryer_stats[4]["col_name"].upper()
-            
-            if (pd.notna(dryer_stats[3]["max"]) and dryer_stats[3]["max"] > 200.0) and pd.isna(dryer_stats[4]["max"]):
+            p3_max = dryer_stats[3]["max"]
+            p4_max = dryer_stats[4]["max"]
+
+            if (pd.notna(p3_max) and p3_max > 200.0) and (pd.isna(p4_max) or p4_max < 100.0):
                 if ("END CAP" in p3_lbl or "RD" in p3_lbl) and ("INLET" in p4_lbl or "BLOCK" in p4_lbl):
                     dryer_stats[3], dryer_stats[4] = dryer_stats[4], dryer_stats[3]
 
@@ -891,25 +862,25 @@ if uploaded_file:
             d_val = dryer_stats[p_num]["max"]
             d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
 
-            # 2. Dwell Times Calculation
+            # 2. Dwell Times Calculation (นับจำนวนวินาทีช่วงอุณหภูมิถึงเกณฑ์ตามมาตรฐาน)
             # Brazing at 577°C
             if is_valid and pd.notna(br_val) and br_val >= 577.0:
-                br_dwell_sec = calculate_dwell_time(brazing_ht_subset, col_name, 577.0)
-                br_dwell_str = format_seconds_to_time(br_dwell_sec) if br_dwell_sec > 0 else "***"
+                br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
+                br_dwell_str = format_seconds_to_time(br_cnt)
             else:
                 br_dwell_str = "***"
 
-            # Debinder at 300°C (คำนวณครอบคลุมช่วง 298s ถึง 934s)
+            # Debinder at 300°C (ช่วง 298s ถึง 840s)
             if is_valid and pd.notna(db_val) and db_val >= 300.0:
-                db_dwell_sec = calculate_dwell_time(debinder_subset, col_name, 300.0)
-                db_dwell_str = format_seconds_to_time(db_dwell_sec) if db_dwell_sec > 0 else "***"
+                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
+                db_dwell_str = format_seconds_to_time(db_cnt)
             else:
                 db_dwell_str = "***"
 
-            # Dryer at 200°C (คำนวณช่วง 0s ถึง 271s)
-            d_dwell_sec = dryer_stats[p_num]["dwell_sec"]
-            if pd.notna(d_val) and d_val >= 200.0 and d_dwell_sec > 0:
-                d_dwell_str = format_seconds_to_time(d_dwell_sec)
+            # Dryer at 200°C (ช่วง 0s ถึง 270s)
+            d_cnt_200 = dryer_stats[p_num]["cnt_200"]
+            if pd.notna(d_val) and d_val >= 200.0 and d_cnt_200 > 0:
+                d_dwell_str = format_seconds_to_time(d_cnt_200)
             else:
                 d_dwell_str = "***"
 
