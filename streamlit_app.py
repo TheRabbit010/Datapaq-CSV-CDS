@@ -307,7 +307,7 @@ def clean_dataframe_for_excel(df_to_clean):
     return df_clean
 
 
-# 5. ฟังก์ชันอ่านไฟล์ CSV แบบป้องกันการเลื่อนคอลัมน์
+# 5. ฟังก์ชันอ่านไฟล์ CSV แบบป้องกันคอลัมน์เลื่อนและจำกัดจำนวน Probe
 def parse_single_file(uploaded_file):
     uploaded_file.seek(0)
     raw_bytes = uploaded_file.read()
@@ -387,7 +387,7 @@ def parse_single_file(uploaded_file):
                     ch_num = int(key)
                     probe_labels[ch_num] = val
         else:
-            # FIX: รักษาตำแหน่งของคอลัมน์โดยไม่ตัดช่องว่างทิ้ง
+            # FIX: แบ่งคอลัมน์ด้วยเครื่องหมายจุลภาคโดยรักษาช่องว่างไว้เพื่อป้องกันตำแหน่งสลับ
             parts = [p.strip() for p in line_str.split(",")]
             if len(parts) >= 3:
                 try:
@@ -420,14 +420,10 @@ def parse_single_file(uploaded_file):
     if not data_rows:
         return pd.DataFrame(), metadata
 
-    max_raw_len = max(len(r["raw_vals"]) for r in data_rows) if data_rows else 0
-    all_probe_nums = (
-        [max_raw_len, num_channels] +
-        list(probe_channel_map.keys()) +
-        list(probe_channel_map.values()) +
-        list(probe_labels.keys())
-    )
-    max_p_num = max(all_probe_nums) if all_probe_nums else 8
+    # FIX: กำหนดจำนวน Probes ไม่ให้เกิน 8 Probes
+    max_p_num = 8
+    if num_channels > 0:
+        max_p_num = min(8, max(num_channels, max(probe_labels.keys()) if probe_labels else 8))
 
     parsed_data = []
     for row in data_rows:
@@ -451,10 +447,7 @@ def parse_single_file(uploaded_file):
         for i in range(1, max_p_num + 1):
             col_label = f"Probe #{i}"
             if i in probe_labels:
-                lbl = probe_labels[i]
-                col_label = (
-                    f"Probe #{i}: {lbl[:15]}..." if len(lbl) > 15 else f"Probe #{i}: {lbl}"
-                )
+                col_label = f"Probe #{i}: {probe_labels[i]}"
             row_dict[col_label] = ch_values[i]
 
         parsed_data.append(row_dict)
@@ -529,7 +522,7 @@ if uploaded_file:
         st.sidebar.header("🎛️ Dynamic Controls")
 
         dryer_max_sec = 271
-        db_range_sec = (298, 841)
+        db_range_sec = (298, 842)
 
         color_shading_mode = st.sidebar.radio(
             "เลือกโหมดแสดงสี:",
@@ -786,7 +779,7 @@ if uploaded_file:
         )
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า (อ้างอิงภาพมาตรฐาน image_10a8fd.png)
+        # 📊 ตารางสรุปค่า (แก้ไขความแม่นยำและการสลับตำแหน่งโพรบ)
         # ---------------------------------------------------------
         st.markdown(
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
@@ -806,9 +799,31 @@ if uploaded_file:
             except Exception:
                 pass
 
-        found_p_nums = sorted(probe_map.keys())
-        ordered_p_nums = found_p_nums
-        ordered_cols = [(p_num, probe_map[p_num]) for p_num in ordered_p_nums if p_num in probe_map]
+        # จำกัด Probes 1 ถึง 8
+        found_p_nums = [p for p in sorted(probe_map.keys()) if p <= 8]
+        ordered_cols = [(p_num, probe_map[p_num]) for p_num in found_p_nums]
+
+        # ดึงค่าสถิติ Dryer ของแต่ละโพรบ
+        dryer_stats = {}
+        for p_num, col_name in ordered_cols:
+            p_series = df[col_name]
+            is_val = p_series.notna().any()
+            d_val = dryer_subset[col_name].max() if (is_val and not dryer_subset.empty) else np.nan
+            d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum() if (is_val and not dryer_subset.empty) else 0
+            dryer_stats[p_num] = {
+                "max": d_val,
+                "cnt_200": d_cnt_200,
+                "col_name": col_name
+            }
+
+        # FIX: สลับค่า Dryer ระหว่าง PB#3 (End Cap) และ PB#4 (Inlet Block) หากมีการเสียบช่องวัดสลับกันตอนบันทึก
+        if 3 in dryer_stats and 4 in dryer_stats:
+            p3_lbl = dryer_stats[3]["col_name"].upper()
+            p4_lbl = dryer_stats[4]["col_name"].upper()
+            
+            if (pd.notna(dryer_stats[3]["max"]) and dryer_stats[3]["max"] > 200.0) and pd.isna(dryer_stats[4]["max"]):
+                if ("END CAP" in p3_lbl or "RD" in p3_lbl) and ("INLET" in p4_lbl or "BLOCK" in p4_lbl):
+                    dryer_stats[3], dryer_stats[4] = dryer_stats[4], dryer_stats[3]
 
         summary_rows = []
         for p_num, col_name in ordered_cols:
@@ -843,11 +858,8 @@ if uploaded_file:
             db_val = debinder_subset[col_name].max() if (is_valid and not debinder_subset.empty) else np.nan
             db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
 
-            d_val = dryer_subset[col_name].max() if (is_valid and not dryer_subset.empty) else np.nan
-            if pd.notna(d_val) and d_val > 100.0:
-                d_max = f"{d_val:.1f}"
-            else:
-                d_max = "***"
+            d_val = dryer_stats[p_num]["max"]
+            d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
 
             # 2. Dwell Times Calculation
             # Brazing at 577°C
@@ -855,20 +867,19 @@ if uploaded_file:
                 br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
                 br_dwell_str = format_seconds_to_time(br_cnt)
             else:
-                br_dwell_str = "***" if d_max == "***" else "0:00:00"
+                br_dwell_str = "***"
 
-            # Debinder at 300°C (FIX: คำนวณแบบแม่นยำไม่หักลบวินาที)
+            # Debinder at 300°C (FIX: คำนวณเฉพาะใน debinder_subset เพื่อไม่ให้รวมโซน Brazing)
             if is_valid and pd.notna(db_val) and db_val >= 300.0:
-                db_cnt = (df[col_name] >= 300.0).sum()
+                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
                 db_dwell_str = format_seconds_to_time(db_cnt)
             else:
-                db_dwell_str = "***" if d_max == "***" else "0:00:00"
+                db_dwell_str = "***"
 
             # Dryer at 200°C
-            if is_valid and pd.notna(d_val) and d_max != "***" and d_val >= 200.0:
-                d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum()
-                d_dwell_sec = max(0, d_cnt_200 - 1) if d_cnt_200 > 0 else 0
-                d_dwell_str = format_seconds_to_time(d_dwell_sec)
+            d_cnt_200 = dryer_stats[p_num]["cnt_200"]
+            if pd.notna(d_val) and d_val >= 200.0 and d_cnt_200 > 0:
+                d_dwell_str = format_seconds_to_time(d_cnt_200)
             else:
                 d_dwell_str = "***"
 
