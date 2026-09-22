@@ -195,12 +195,8 @@ def format_seconds_to_time(total_seconds):
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
-# ฟังก์ชันคำนวณเวลาสะสม (Dwell Time) แม่นยำ รองรับทุก Sampling Rate
+# ฟังก์ชันคำนวณเวลาสะสม (Dwell Time) แม่นยำ
 def calculate_dwell_time(df_subset, col_name, temp_threshold):
-    """
-    คำนวณเวลาสะสม (วินาที) ที่ probe มีอุณหภูมิ >= temp_threshold ใน dataframe subset
-    โดยคำนวณความแตกต่างเวลาจริง (ElapsedSeconds) ทำให้แม่นยำไม่ว่าจะใช้ Sampling Rate เท่าใด
-    """
     if df_subset.empty or col_name not in df_subset.columns:
         return 0.0
 
@@ -212,13 +208,11 @@ def calculate_dwell_time(df_subset, col_name, temp_threshold):
     if not mask.any():
         return 0.0
 
-    # หา sample interval (dt) มัธยฐานของไฟล์
     dt_series = sub["ElapsedSeconds"].diff()
     median_dt = dt_series[dt_series > 0].median()
     if pd.isna(median_dt) or median_dt <= 0:
         median_dt = 1.0
 
-    # กำหนด dt ให้เหมาะสมสำหรับแถวแรกหรือจุดที่เวลาต่อเนื่องกัน
     dt_series = dt_series.apply(
         lambda x: x if (pd.notna(x) and 0 < x <= median_dt * 3) else median_dt
     )
@@ -557,19 +551,6 @@ if uploaded_file:
             index=0,
         )
 
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("⏱️ ช่วงเวลาประมวลผลโซน (วิ)")
-        dryer_max_sec = st.sidebar.number_input(
-            "Dryer End Time (s):", value=298, min_value=0, step=10
-        )
-        db_start_sec = st.sidebar.number_input(
-            "Debinder Start Time (s):", value=298, min_value=0, step=10
-        )
-        db_end_sec = st.sidebar.number_input(
-            "Debinder End Time (s):", value=934, min_value=0, step=10
-        )
-        db_range_sec = (db_start_sec, db_end_sec)
-
         if color_shading_mode == "แสดงสีตามโซน (By Zone)":
             zones_data = [
                 {"Start Time": "00:00:00", "End Time": "00:02:14", "Zone Name": "Dryer Z#1", "Color": "#F7DC6F"},
@@ -819,11 +800,15 @@ if uploaded_file:
         )
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า (การคำนวณ Dwell Time แบบแม่นยำสูง)
+        # 📊 ตารางสรุปค่า (แก้ไขขอบเขตช่วงเวลาประมวลผลมาตรฐาน)
         # ---------------------------------------------------------
         st.markdown(
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
         )
+
+        # กำหนดช่วงเวลามาตรฐานให้ตรงกับรายงานอ้างอิง
+        dryer_max_sec = 271
+        db_range_sec = (298, 934)
 
         dryer_subset = df[(df["ElapsedSeconds"] >= 0) & (df["ElapsedSeconds"] <= dryer_max_sec)]
         debinder_subset = df[(df["ElapsedSeconds"] >= db_range_sec[0]) & (df["ElapsedSeconds"] <= db_range_sec[1])]
@@ -906,7 +891,7 @@ if uploaded_file:
             d_val = dryer_stats[p_num]["max"]
             d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
 
-            # 2. Dwell Times Calculation (คำนวณจาก Delta Time จริง)
+            # 2. Dwell Times Calculation
             # Brazing at 577°C
             if is_valid and pd.notna(br_val) and br_val >= 577.0:
                 br_dwell_sec = calculate_dwell_time(brazing_ht_subset, col_name, 577.0)
@@ -914,14 +899,14 @@ if uploaded_file:
             else:
                 br_dwell_str = "***"
 
-            # Debinder at 300°C
+            # Debinder at 300°C (คำนวณครอบคลุมช่วง 298s ถึง 934s)
             if is_valid and pd.notna(db_val) and db_val >= 300.0:
                 db_dwell_sec = calculate_dwell_time(debinder_subset, col_name, 300.0)
                 db_dwell_str = format_seconds_to_time(db_dwell_sec) if db_dwell_sec > 0 else "***"
             else:
                 db_dwell_str = "***"
 
-            # Dryer at 200°C
+            # Dryer at 200°C (คำนวณช่วง 0s ถึง 271s)
             d_dwell_sec = dryer_stats[p_num]["dwell_sec"]
             if pd.notna(d_val) and d_val >= 200.0 and d_dwell_sec > 0:
                 d_dwell_str = format_seconds_to_time(d_dwell_sec)
