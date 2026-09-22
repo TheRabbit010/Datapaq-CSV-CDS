@@ -195,6 +195,38 @@ def format_seconds_to_time(total_seconds):
     return f"{hours}:{minutes:02d}:{seconds:02d}"
 
 
+# ฟังก์ชันคำนวณเวลาสะสม (Dwell Time) แม่นยำ รองรับทุก Sampling Rate
+def calculate_dwell_time(df_subset, col_name, temp_threshold):
+    """
+    คำนวณเวลาสะสม (วินาที) ที่ probe มีอุณหภูมิ >= temp_threshold ใน dataframe subset
+    โดยคำนวณความแตกต่างเวลาจริง (ElapsedSeconds) ทำให้แม่นยำไม่ว่าจะใช้ Sampling Rate เท่าใด
+    """
+    if df_subset.empty or col_name not in df_subset.columns:
+        return 0.0
+
+    sub = df_subset[["ElapsedSeconds", col_name]].dropna().sort_values("ElapsedSeconds")
+    if sub.empty:
+        return 0.0
+
+    mask = sub[col_name] >= temp_threshold
+    if not mask.any():
+        return 0.0
+
+    # หา sample interval (dt) มัธยฐานของไฟล์
+    dt_series = sub["ElapsedSeconds"].diff()
+    median_dt = dt_series[dt_series > 0].median()
+    if pd.isna(median_dt) or median_dt <= 0:
+        median_dt = 1.0
+
+    # กำหนด dt ให้เหมาะสมสำหรับแถวแรกหรือจุดที่เวลาต่อเนื่องกัน
+    dt_series = dt_series.apply(
+        lambda x: x if (pd.notna(x) and 0 < x <= median_dt * 3) else median_dt
+    )
+
+    dwell_seconds = dt_series[mask].sum()
+    return float(dwell_seconds)
+
+
 # ฟังก์ชันแปลงรูปแบบเวลาเป็นวินาที
 def parse_time_to_sec(val):
     if pd.isna(val) or not val or val == "-" or str(val).strip() in ["", "***", "nan", "NaN"]:
@@ -387,7 +419,6 @@ def parse_single_file(uploaded_file):
                     ch_num = int(key)
                     probe_labels[ch_num] = val
         else:
-            # FIX: แบ่งคอลัมน์ด้วยเครื่องหมายจุลภาคโดยรักษาช่องว่างไว้เพื่อป้องกันตำแหน่งสลับ
             parts = [p.strip() for p in line_str.split(",")]
             if len(parts) >= 3:
                 try:
@@ -420,7 +451,6 @@ def parse_single_file(uploaded_file):
     if not data_rows:
         return pd.DataFrame(), metadata
 
-    # FIX: กำหนดจำนวน Probes ไม่ให้เกิน 8 Probes
     max_p_num = 8
     if num_channels > 0:
         max_p_num = min(8, max(num_channels, max(probe_labels.keys()) if probe_labels else 8))
@@ -521,14 +551,24 @@ if uploaded_file:
         st.sidebar.markdown("---")
         st.sidebar.header("🎛️ Dynamic Controls")
 
-        dryer_max_sec = 271
-        db_range_sec = (298, 842)
-
         color_shading_mode = st.sidebar.radio(
             "เลือกโหมดแสดงสี:",
             ["แสดงสีตามโซน (By Zone)", "แสดงสีตามกลุ่มงาน (By Process Group)"],
             index=0,
         )
+
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("⏱️ ช่วงเวลาประมวลผลโซน (วิ)")
+        dryer_max_sec = st.sidebar.number_input(
+            "Dryer End Time (s):", value=298, min_value=0, step=10
+        )
+        db_start_sec = st.sidebar.number_input(
+            "Debinder Start Time (s):", value=298, min_value=0, step=10
+        )
+        db_end_sec = st.sidebar.number_input(
+            "Debinder End Time (s):", value=934, min_value=0, step=10
+        )
+        db_range_sec = (db_start_sec, db_end_sec)
 
         if color_shading_mode == "แสดงสีตามโซน (By Zone)":
             zones_data = [
@@ -779,7 +819,7 @@ if uploaded_file:
         )
 
         # ---------------------------------------------------------
-        # 📊 ตารางสรุปค่า (แก้ไขความแม่นยำและการสลับตำแหน่งโพรบ)
+        # 📊 ตารางสรุปค่า (การคำนวณ Dwell Time แบบแม่นยำสูง)
         # ---------------------------------------------------------
         st.markdown(
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
@@ -799,24 +839,29 @@ if uploaded_file:
             except Exception:
                 pass
 
-        # จำกัด Probes 1 ถึง 8
         found_p_nums = [p for p in sorted(probe_map.keys()) if p <= 8]
         ordered_cols = [(p_num, probe_map[p_num]) for p_num in found_p_nums]
 
-        # ดึงค่าสถิติ Dryer ของแต่ละโพรบ
+        # ดึงค่าสถิติ Dryer และ Dwell Time ของแต่ละโพรบ
         dryer_stats = {}
         for p_num, col_name in ordered_cols:
             p_series = df[col_name]
             is_val = p_series.notna().any()
-            d_val = dryer_subset[col_name].max() if (is_val and not dryer_subset.empty) else np.nan
-            d_cnt_200 = (dryer_subset[col_name] >= 200.0).sum() if (is_val and not dryer_subset.empty) else 0
+            
+            if is_val and not dryer_subset.empty:
+                d_val = dryer_subset[col_name].max()
+                d_dwell_sec = calculate_dwell_time(dryer_subset, col_name, 200.0)
+            else:
+                d_val = np.nan
+                d_dwell_sec = 0.0
+
             dryer_stats[p_num] = {
                 "max": d_val,
-                "cnt_200": d_cnt_200,
+                "dwell_sec": d_dwell_sec,
                 "col_name": col_name
             }
 
-        # FIX: สลับค่า Dryer ระหว่าง PB#3 (End Cap) และ PB#4 (Inlet Block) หากมีการเสียบช่องวัดสลับกันตอนบันทึก
+        # สลับค่า Dryer ระหว่าง PB#3 (End Cap) และ PB#4 (Inlet Block) หากมีการเสียบช่องวัดสลับกัน
         if 3 in dryer_stats and 4 in dryer_stats:
             p3_lbl = dryer_stats[3]["col_name"].upper()
             p4_lbl = dryer_stats[4]["col_name"].upper()
@@ -861,25 +906,25 @@ if uploaded_file:
             d_val = dryer_stats[p_num]["max"]
             d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
 
-            # 2. Dwell Times Calculation
+            # 2. Dwell Times Calculation (คำนวณจาก Delta Time จริง)
             # Brazing at 577°C
             if is_valid and pd.notna(br_val) and br_val >= 577.0:
-                br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
-                br_dwell_str = format_seconds_to_time(br_cnt)
+                br_dwell_sec = calculate_dwell_time(brazing_ht_subset, col_name, 577.0)
+                br_dwell_str = format_seconds_to_time(br_dwell_sec) if br_dwell_sec > 0 else "***"
             else:
                 br_dwell_str = "***"
 
-            # Debinder at 300°C (FIX: คำนวณเฉพาะใน debinder_subset เพื่อไม่ให้รวมโซน Brazing)
+            # Debinder at 300°C
             if is_valid and pd.notna(db_val) and db_val >= 300.0:
-                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
-                db_dwell_str = format_seconds_to_time(db_cnt)
+                db_dwell_sec = calculate_dwell_time(debinder_subset, col_name, 300.0)
+                db_dwell_str = format_seconds_to_time(db_dwell_sec) if db_dwell_sec > 0 else "***"
             else:
                 db_dwell_str = "***"
 
             # Dryer at 200°C
-            d_cnt_200 = dryer_stats[p_num]["cnt_200"]
-            if pd.notna(d_val) and d_val >= 200.0 and d_cnt_200 > 0:
-                d_dwell_str = format_seconds_to_time(d_cnt_200)
+            d_dwell_sec = dryer_stats[p_num]["dwell_sec"]
+            if pd.notna(d_val) and d_val >= 200.0 and d_dwell_sec > 0:
+                d_dwell_str = format_seconds_to_time(d_dwell_sec)
             else:
                 d_dwell_str = "***"
 
