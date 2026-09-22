@@ -307,7 +307,7 @@ def clean_dataframe_for_excel(df_to_clean):
     return df_clean
 
 
-# 5. ฟังก์ชันอ่านไฟล์ CSV แบบป้องกันคอลัมน์เลื่อนและจำกัดจำนวน Probe
+# 5. ฟังก์ชันอ่านไฟล์ CSV แบบป้องกันคอลัมน์เลื่อนและแมปช่องโพรบถูกต้อง
 def parse_single_file(uploaded_file):
     uploaded_file.seek(0)
     raw_bytes = uploaded_file.read()
@@ -420,9 +420,6 @@ def parse_single_file(uploaded_file):
         return pd.DataFrame(), metadata
 
     max_p_num = 8
-    if num_channels > 0:
-        max_p_num = min(8, max(num_channels, max(probe_labels.keys()) if probe_labels else 8))
-
     parsed_data = []
     for row in data_rows:
         row_dict = {
@@ -434,11 +431,18 @@ def parse_single_file(uploaded_file):
         ch_values = {ch: np.nan for ch in range(1, max_p_num + 1)}
         raw_vals = row["raw_vals"]
 
+        # FIX: แมปเฉพาะช่องที่มีการเปิดใช้ใน probe_channel_map ไม่ให้อ่านช่องว่างเกินมาทับ PB#8
         for idx, val_str in enumerate(raw_vals):
             col_idx = idx + 1
-            ch_num = probe_channel_map.get(col_idx, col_idx)
-            val_num = safe_float(val_str)
+            if probe_channel_map:
+                if col_idx in probe_channel_map:
+                    ch_num = probe_channel_map[col_idx]
+                else:
+                    continue
+            else:
+                ch_num = col_idx
 
+            val_num = safe_float(val_str)
             if 1 <= ch_num <= max_p_num:
                 ch_values[ch_num] = val_num
 
@@ -780,7 +784,7 @@ if uploaded_file:
             "### 📊 ตารางสรุปผลการวิเคราะห์ (Data Table for Google Sheets Copy)"
         )
 
-        # กำหนดช่วงเวลาประมวลผลมาตรฐาน
+        # กำหนดช่วงเวลาประมวลผลมาตรฐานที่แม่นยำ
         dryer_max_sec = 270
         db_range_sec = (298, 840)
 
@@ -799,8 +803,7 @@ if uploaded_file:
             except Exception:
                 pass
 
-        found_p_nums = [p for p in sorted(probe_map.keys()) if p <= 8]
-        ordered_cols = [(p_num, probe_map[p_num]) for p_num in found_p_nums]
+        ordered_cols = [(p_num, probe_map[p_num]) for p_num in range(1, 9) if p_num in probe_map]
 
         # ดึงค่าสถิติ Dryer ของแต่ละโพรบ
         dryer_stats = {}
@@ -827,61 +830,73 @@ if uploaded_file:
                     dryer_stats[3], dryer_stats[4] = dryer_stats[4], dryer_stats[3]
 
         summary_rows = []
-        for p_num, col_name in ordered_cols:
-            label_part = col_name.split(":", 1)[1].strip() if ":" in col_name else ""
-            lbl_upper = label_part.upper().strip()
+        for p_num in range(1, 9):
+            col_name = probe_map.get(p_num, None)
+            short_pb_name = f"PB#{p_num}"
 
-            primary_part = re.split(r"[-/]", lbl_upper)[0].strip() if lbl_upper else ""
+            if col_name and ":" in col_name:
+                label_part = col_name.split(":", 1)[1].strip()
+                lbl_upper = label_part.upper().strip()
+                primary_part = re.split(r"[-/]", lbl_upper)[0].strip() if lbl_upper else ""
 
-            if "BOT" in primary_part or "BOTTOM" in primary_part or "BOT CORE" in lbl_upper:
-                location = "Bottom"
-            elif "TOP" in primary_part or "TOP CORE" in lbl_upper:
-                location = "Top"
-            elif "FRONT" in primary_part or "FRONT" in lbl_upper:
-                location = "Front"
-            elif "REAR" in primary_part or "REAR" in lbl_upper:
-                location = "Rear"
-            elif "RIGHT" in primary_part:
-                location = "Right"
-            elif "LEFT" in primary_part:
-                location = "Left"
+                if "BOT" in primary_part or "BOTTOM" in primary_part or "BOT CORE" in lbl_upper:
+                    location = "Bottom"
+                elif "TOP" in primary_part or "TOP CORE" in lbl_upper:
+                    location = "Top"
+                elif "FRONT" in primary_part or "FRONT" in lbl_upper:
+                    location = "Front"
+                elif "REAR" in primary_part or "REAR" in lbl_upper:
+                    location = "Rear"
+                elif "RIGHT" in primary_part:
+                    location = "Right"
+                elif "LEFT" in primary_part:
+                    location = "Left"
+                else:
+                    location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
             else:
                 location = "Bottom" if p_num in [1, 2, 3, 4] else "Top"
 
-            short_pb_name = f"PB#{p_num}"
-            probe_series = df[col_name]
-            is_valid = probe_series.notna().any()
+            if col_name and col_name in df.columns:
+                probe_series = df[col_name]
+                is_valid = probe_series.notna().any()
 
-            # 1. Max Temp Calculation
-            br_val = brazing_max_subset[col_name].max() if (is_valid and not brazing_max_subset.empty) else np.nan
-            br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
+                # 1. Max Temp Calculation
+                br_val = brazing_max_subset[col_name].max() if (is_valid and not brazing_max_subset.empty) else np.nan
+                br_max = f"{br_val:.1f}" if pd.notna(br_val) else "***"
 
-            db_val = debinder_subset[col_name].max() if (is_valid and not debinder_subset.empty) else np.nan
-            db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
+                db_val = debinder_subset[col_name].max() if (is_valid and not debinder_subset.empty) else np.nan
+                db_max = f"{db_val:.1f}" if pd.notna(db_val) else "***"
 
-            d_val = dryer_stats[p_num]["max"]
-            d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
+                d_val = dryer_stats[p_num]["max"] if p_num in dryer_stats else np.nan
+                d_max = f"{d_val:.1f}" if (pd.notna(d_val) and d_val > 0) else "***"
 
-            # 2. Dwell Times Calculation (นับจำนวนวินาทีช่วงอุณหภูมิถึงเกณฑ์ตามมาตรฐาน)
-            # Brazing at 577°C
-            if is_valid and pd.notna(br_val) and br_val >= 577.0:
-                br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
-                br_dwell_str = format_seconds_to_time(br_cnt)
+                # 2. Dwell Times Calculation
+                # Brazing at 577°C
+                if is_valid and pd.notna(br_val) and br_val >= 577.0:
+                    br_cnt = (brazing_ht_subset[col_name] >= 577.0).sum()
+                    br_dwell_str = format_seconds_to_time(br_cnt)
+                else:
+                    br_dwell_str = "***"
+
+                # Debinder at 300°C
+                if is_valid and pd.notna(db_val) and db_val >= 300.0:
+                    db_cnt = (debinder_subset[col_name] >= 300.0).sum()
+                    db_dwell_str = format_seconds_to_time(db_cnt)
+                else:
+                    db_dwell_str = "***"
+
+                # Dryer at 200°C
+                d_cnt_200 = dryer_stats[p_num]["cnt_200"] if p_num in dryer_stats else 0
+                if pd.notna(d_val) and d_val >= 200.0 and d_cnt_200 > 0:
+                    d_dwell_str = format_seconds_to_time(d_cnt_200)
+                else:
+                    d_dwell_str = "***"
             else:
+                br_max = "***"
+                db_max = "***"
+                d_max = "***"
                 br_dwell_str = "***"
-
-            # Debinder at 300°C (ช่วง 298s ถึง 840s)
-            if is_valid and pd.notna(db_val) and db_val >= 300.0:
-                db_cnt = (debinder_subset[col_name] >= 300.0).sum()
-                db_dwell_str = format_seconds_to_time(db_cnt)
-            else:
                 db_dwell_str = "***"
-
-            # Dryer at 200°C (ช่วง 0s ถึง 270s)
-            d_cnt_200 = dryer_stats[p_num]["cnt_200"]
-            if pd.notna(d_val) and d_val >= 200.0 and d_cnt_200 > 0:
-                d_dwell_str = format_seconds_to_time(d_cnt_200)
-            else:
                 d_dwell_str = "***"
 
             summary_rows.append([
